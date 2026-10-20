@@ -1,17 +1,32 @@
 // --- CONSTANTS ---
 
-const W = 480;
-const H = 720;
+const DESIGN_HEIGHT = 720;
+const MIN_STAGE_WIDTH = 480;
+const MAX_STAGE_WIDTH = 1280;
+const WIDE_ASPECT_THRESHOLD = 1.05;
+
 const FONT = { fontFamily: "monospace", fontSize: "16px" };
-const COLOR = { BG: "#0c0805", FG: "#d3b582" }
+const COLOR = {
+  BG: "#0c0805",
+  FG: "#d3b582",
+  DIM: "#8a7550",
+  GOOD: "#9fd08a",
+  BAD: "#d97a63",
+};
+
 const MORSE_CODE = { E: ".", T: "-", I: "..", M: "--", A: ".-", N: "-.", S: "...", O: "---", H: "....", R: ".-.", D: "-..", L: ".-.." };
 const LETTER_ORDER = "ETIMANSOHRDL";
+
 const RAW_WORD_CORPUS = `
-EMIT 
+IT
+ME
+MET
+TIE
+EMIT
 ITEM
 MEET
 MITE
-TIME 
+TIME
 STONE
 NOTES
 MOIST
@@ -25,15 +40,23 @@ NORTH
 SOLDIER
 THREAD
 `;
-const WORDS = RAW_WORD_CORPUS.trim().split(/\r?\n/).map(word => word.trim().toUpperCase()).filter(word => word.length > 0);
-const BEAT_SECONDS = 0.5;
+const WORDS = RAW_WORD_CORPUS.trim().split(/\r?\n/).map((word) => word.trim().toUpperCase()).filter((word) => word.length > 0);
+
+const BEAT_START_SECONDS = 0.65;
+const BEAT_MIN_SECONDS = 0.5;
+const BEAT_STEP_SECONDS = 0.03;
 const HIT_WINDOW_SECONDS = 0.25;
 const DASH_MIN_SECONDS = 0.12;
 const DOT_MAX_SECONDS = 0.25;
 const DASH_FORCE_RESOLVE_SECONDS = 1.0;
-const TIMING_LINE_X = 120;
-const HIDE_MASTERED_LABELS = false;
+const QUALITY_REGEN_PER_SECOND = 5;
+const QUALITY_MISS_PENALTY = 10;
 const WORD_HISTORY_LIMIT = 5;
+const LEAD_IN_SECONDS = 3.2;
+const RUNWAY_SECONDS = 3.2;
+const SEND_KEYS = new Set(["Space", "Enter", "KeyJ", "KeyF"]);
+const SAVE_KEY = "telegraphist.save.v1";
+
 const PLAY_BACKGROUND_SHADER = `
 precision mediump float;
 uniform vec2 resolution;
@@ -52,56 +75,114 @@ void main() {
 }
 `;
 
-/**
- * @typedef {{
- *   letter: string,
- *   on: number,
- *   dash: boolean,
- *   label?: Phaser.GameObjects.Text,
- *   done?: 1 | 2
- * }} MorseSignalNote
- */
+// --- STAGE ---
 
 /**
- * @typedef {{
- *   attempts: number,
- *   hits: number,
- * }} LetterStat
+ * Width follows the window aspect on desktop; portrait stays at the original
+ * 480x720. Height is always the design height, so pixel sizes are stable.
  */
+function computeStage() {
+  const width = window.innerWidth || MIN_STAGE_WIDTH;
+  const height = window.innerHeight || DESIGN_HEIGHT;
+  const aspect = width / Math.max(1, height);
 
-// --- VARIABLES ---
+  if (aspect <= WIDE_ASPECT_THRESHOLD) {
+    return { W: MIN_STAGE_WIDTH, H: DESIGN_HEIGHT, wide: false };
+  }
 
-/** 
- * @type {Record<string, LetterStat>} 
+  const stageWidth = Math.round(DESIGN_HEIGHT * aspect);
+  return {
+    W: Math.min(MAX_STAGE_WIDTH, Math.max(720, stageWidth)),
+    H: DESIGN_HEIGHT,
+    wide: true,
+  };
+}
+
+const STAGE = computeStage();
+const REDUCED_MOTION = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false;
+
+// --- SAVE DATA ---
+
+function loadSave() {
+  try {
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const saveData = Object.assign(
+  { mute: false, tick: true, best: 0, letters: {} },
+  loadSave()
+);
+
+// Defend against hand-edited or half-written storage.
+if (!saveData.letters || typeof saveData.letters !== "object" || Array.isArray(saveData.letters)) saveData.letters = {};
+if (typeof saveData.best !== "number" || !Number.isFinite(saveData.best)) saveData.best = 0;
+
+/** @type {Record<string, LetterStat>} */
+const letterStats = saveData.letters;
+
+let persistTimer = null;
+
+function persistSave() {
+  if (persistTimer) return;
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    try {
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+    } catch {
+      /* storage disabled, play without persistence */
+    }
+  }, 200);
+}
+
+/**
+ * @param {string} letter
+ * @returns {LetterStat}
  */
-const letterStats = {};
+const statsFor = (letter) => letterStats[letter] || (letterStats[letter] = { attempts: 0, hits: 0 });
+
+/**
+ * @param {string} letter
+ * @returns {boolean}
+ */
+const isMastered = (letter) => {
+  const stats = statsFor(letter);
+  return stats.attempts >= 5 && stats.hits / stats.attempts >= 0.75;
+};
 
 // --- SFX ---
 
-const ctxOf = (scene) => (scene.sound && scene.sound.context ? scene.sound.context : null);
+const ctxOf = (scene) => (audio ? audio : scene.sound && scene.sound.context ? scene.sound.context : null);
+const outOf = (ctx) => (audio && ctx === audio && masterGain ? masterGain : ctx.destination);
 
-function tone(scene, freq, dur, waveType, gain, slide, when) {
-  const ctx = ctxOf(scene)
+function tone(scene, freq, dur, waveType, gain, slide, delay) {
+  if (saveData.mute) return;
+  const ctx = ctxOf(scene);
   if (!ctx) return;
 
-  const t0 = ctx.currentTime + (when || 0)
-  const o = ctx.createOscillator();
-  const g = ctx.createGain();
+  const t0 = ctx.currentTime + (delay || 0);
+  const oscillator = ctx.createOscillator();
+  const envelope = ctx.createGain();
 
-  o.type = waveType || "sine";
-  o.frequency.setValueAtTime(freq, t0);
-  if (slide) o.frequency.linearRampToValueAtTime(Math.max(24, freq + slide), t0 + dur);
+  oscillator.type = waveType || "sine";
+  oscillator.frequency.setValueAtTime(freq, t0);
+  if (slide) oscillator.frequency.linearRampToValueAtTime(Math.max(24, freq + slide), t0 + dur);
 
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.linearRampToValueAtTime(gain === null ? 0.15 : gain, t0 + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  envelope.gain.setValueAtTime(0.0001, t0);
+  envelope.gain.linearRampToValueAtTime(gain === null ? 0.15 : gain, t0 + 0.008);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-  o.connect(g).connect(ctx.destination);
-  o.start(t0);
-  o.stop(t0 + dur + 0.03);
+  oscillator.connect(envelope).connect(outOf(ctx));
+  oscillator.start(t0);
+  oscillator.stop(t0 + dur + 0.03);
 }
 
 function noise(scene, dur, gain, freq, q) {
+  if (saveData.mute) return;
   const ctx = ctxOf(scene);
   if (!ctx) return;
 
@@ -113,11 +194,11 @@ function noise(scene, dur, gain, freq, q) {
     data[i] = Math.random() * 2 - 1;
   }
 
-  const src = ctx.createBufferSource();
+  const source = ctx.createBufferSource();
   const filter = ctx.createBiquadFilter();
   const output = ctx.createGain();
 
-  src.buffer = buffer;
+  source.buffer = buffer;
   filter.type = "bandpass";
   filter.frequency.value = freq || 1200;
   filter.Q.value = q || 1;
@@ -125,31 +206,37 @@ function noise(scene, dur, gain, freq, q) {
   output.gain.setValueAtTime(gain, ctx.currentTime);
   output.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
 
-  src.connect(filter).connect(output).connect(ctx.destination);
-  src.start();
-  src.stop(ctx.currentTime + dur);
+  source.connect(filter).connect(output).connect(outOf(ctx));
+  source.start();
+  source.stop(ctx.currentTime + dur);
 }
 
 const SFX = {
-  dit: (s) => tone(s, 720, 0.09, "sine", 0.14),
-  dah: (s) => tone(s, 620, 0.22, "sine", 0.13),
-  good: (s) => tone(s, 990, 0.08, "triangle", 0.09, 120),
-  miss: (s) => {
-    noise(s, 0.14, 0.12, 700, 0.7);
-    tone(s, 150, 0.2, "sawtooth", 0.09, -60);
+  dit: (scene) => tone(scene, 720, 0.09, "sine", 0.14),
+  dah: (scene) => tone(scene, 620, 0.22, "sine", 0.13),
+  good: (scene) => tone(scene, 990, 0.08, "triangle", 0.09, 120),
+  miss: (scene) => {
+    noise(scene, 0.14, 0.12, 700, 0.7);
+    tone(scene, 150, 0.2, "sawtooth", 0.09, -60);
   },
-  start: (s) => tone(s, 620, 0.1, "triangle", 0.12, 180),
-  over: (s) => {
-    tone(s, 320, 0.9, "sawtooth", 0.13, -260);
-    tone(s, 210, 1.0, "square", 0.05, -160, 0.1);
+  tick: (scene) => tone(scene, 1400, 0.025, "sine", 0.03),
+  start: (scene) => tone(scene, 620, 0.1, "triangle", 0.12, 180),
+  unlock: (scene) => {
+    tone(scene, 660, 0.12, "triangle", 0.09, 140);
+    tone(scene, 880, 0.16, "triangle", 0.07, 180, 0.1);
+  },
+  over: (scene) => {
+    tone(scene, 320, 0.9, "sawtooth", 0.13, -260);
+    tone(scene, 210, 1.0, "square", 0.05, -160, 0.1);
   },
 };
 
-// --- AUDIO ---
+// --- AMBIENCE ---
 
-let audio;
-let master;
-let audioStarted = false;
+let audio = null;
+let master = null;
+let masterGain = null;
+let ambienceTimer = null;
 
 const scale = [0, 3, 5, 7, 10, 12];
 
@@ -162,85 +249,127 @@ function setupAudio() {
   master.ratio.value = 8;
   master.attack.value = 0.003;
   master.release.value = 0.25;
-  master.connect(audio.destination);
+
+  masterGain = audio.createGain();
+  masterGain.gain.value = saveData.mute ? 0 : 1;
+
+  master.connect(masterGain).connect(audio.destination);
+}
+
+function applyMute() {
+  if (masterGain) masterGain.gain.value = saveData.mute ? 0 : 1;
+  if (saveData.mute) stopAmbience();
+}
+
+function toggleMute() {
+  saveData.mute = !saveData.mute;
+  applyMute();
+  persistSave();
+  if (!saveData.mute && audio) {
+    const playScene = game.scene.getScene("Play");
+    if (playScene && playScene.scene.isActive()) startAmbience();
+  }
+  return saveData.mute;
 }
 
 function playNote(note) {
+  if (!audio || saveData.mute) return;
   const now = audio.currentTime;
-  const osc = audio.createOscillator();
+  const oscillator = audio.createOscillator();
   const gain = audio.createGain();
 
-  osc.type = "triangle"; // smooth; was "triangle";
-  osc.frequency.value = 220 * 2 ** (note / 12);
+  oscillator.type = "triangle";
+  oscillator.frequency.value = 220 * 2 ** (note / 12);
 
   gain.gain.setValueAtTime(0.001, now);
   gain.gain.linearRampToValueAtTime(0.08, now + 0.02);
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
 
-  osc.connect(gain);
+  oscillator.connect(gain);
   gain.connect(master);
 
-  osc.start(now);
-  osc.stop(now + 0.35);
+  oscillator.start(now);
+  oscillator.stop(now + 0.35);
 }
 
 // Gain is a linear amplitude multiplier, not perceived loudness.
-// Melody: 0.08 = 8% amplitude; each pad: 0.01–0.0175 = 1–1.75%.
-// Multiple pads sum together, so keep each quieter to avoid clipping.
-const PADS_VOLUMES = {
-  triangle: [[-4, 0.008], [0, 0.012], [4, 0.007]],
-  sawtooth: [[-8, 0.0125], [0, 0.0175], [7, 0.01]],
-}
-const PAD_VOLUMES = PADS_VOLUMES.sawtooth;
+// Melody: 0.08 = 8% amplitude; each pad: 1–1.75%.
+const PAD_VOICES = [[-8, 0.0125], [0, 0.0175], [7, 0.01]];
 
 function playPad(note) {
+  if (!audio || saveData.mute) return;
   const now = audio.currentTime;
 
-  for (const [detune, volume] of PAD_VOLUMES) {
-    const osc = audio.createOscillator();
+  for (const [detune, volume] of PAD_VOICES) {
+    const oscillator = audio.createOscillator();
     const filter = audio.createBiquadFilter();
     const gain = audio.createGain();
 
-    osc.type = "sawtooth"; // retro non-smoother; was triangle
-    osc.frequency.value = 110 * 2 ** (note / 12);
-    osc.detune.value = detune;
+    oscillator.type = "sawtooth";
+    oscillator.frequency.value = 110 * 2 ** (note / 12);
+    oscillator.detune.value = detune;
 
     filter.type = "lowpass";
-    filter.frequency.value = 650; // brighter; was 350
-    filter.Q.value = 1.0; // 1.0; non-gentler resonance; was 0.5;
+    filter.frequency.value = 650;
+    filter.Q.value = 1.0;
 
     gain.gain.setValueAtTime(0.001, now);
     gain.gain.linearRampToValueAtTime(volume, now + 0.8);
     gain.gain.setTargetAtTime(0.001, now + 1.5, 1.2);
 
-    osc.connect(filter);
+    oscillator.connect(filter);
     filter.connect(gain);
     gain.connect(master);
 
-    osc.start(now);
-    osc.stop(now + 7);
+    oscillator.start(now);
+    oscillator.stop(now + 7);
   }
 }
 
-function play() {
+function playAmbientNote() {
   const note = scale[Math.floor(Math.random() * scale.length)];
-
   playNote(note);
   playPad(note);
 }
 
-document.addEventListener("pointerdown", async () => {
-  if (audioStarted) return;
-  audioStarted = true;
+function startAmbience() {
+  if (!audio || ambienceTimer || saveData.mute) return;
+  playAmbientNote();
+  ambienceTimer = window.setInterval(playAmbientNote, 600);
+}
 
-  setupAudio();
-  await audio.resume();
+function stopAmbience() {
+  if (!ambienceTimer) return;
+  window.clearInterval(ambienceTimer);
+  ambienceTimer = null;
+}
 
-  play();
-  setInterval(play, 600);
-}, { once: true });
+/** Audio needs a user gesture; init on the first pointer or key press. */
+function ensureAudio() {
+  if (audio) return;
+  try {
+    setupAudio();
+    audio.resume();
+  } catch {
+    audio = null;
+  }
+}
+
+window.addEventListener("pointerdown", ensureAudio, { capture: true });
+window.addEventListener("keydown", ensureAudio, { capture: true });
 
 // --- HELPERS ---
+
+function font(size, bold) {
+  return { fontFamily: "monospace", fontSize: `${size}px`, color: COLOR.FG, fontStyle: bold ? "bold" : "normal" };
+}
+
+function destroyLabel(note) {
+  if (note.label) {
+    note.label.destroy();
+    note.label = null;
+  }
+}
 
 /**
  * @param {Phaser.Scene} scene
@@ -248,399 +377,803 @@ document.addEventListener("pointerdown", async () => {
  * @param {number} y
  * @param {string} label
  * @param {() => void} onPress
+ * @param {number} [width]
  * @returns {Phaser.GameObjects.Container}
  */
-function makeActionButton(scene, x, y, label, onPress) {
+function makeActionButton(scene, x, y, label, onPress, width = 220) {
+  const height = 44;
   const container = scene.add.container(x, y);
-  const bg = scene.add.graphics();
+  const background = scene.add.graphics();
 
-  const setBg = (color) => {
-    bg.clear();
-    bg.fillStyle(color, 1);
-    bg.fillRoundedRect(-90, -18, 180, 36, 8);
+  const paint = (color) => {
+    background.clear();
+    background.fillStyle(color, 1);
+    background.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
   };
 
-  const text = scene.add.text(0, 0, label, { ...FONT, fontSize: "18px", color: COLOR.FG }).setOrigin(0.5);
-  container.add([bg, text]);
-  container.setSize(180, 36);
+  const text = scene.add.text(0, 0, label, font(18, true)).setOrigin(0.5);
+  container.add([background, text]);
+  container.labelText = text;
+  container.setSize(width, height);
   container.setInteractive({ useHandCursor: true });
 
-  setBg(0x1a120d);
-  container.on("pointerover", () => setBg(0x2a1e15));
-  container.on("pointerout", () => setBg(0x1a120d));
+  paint(0x1a120d);
+  container.on("pointerover", () => paint(0x2a1e15));
+  container.on("pointerout", () => paint(0x1a120d));
   container.on("pointerdown", () => {
     SFX.good(scene);
-    setBg(0x382814);
+    paint(0x382814);
     text.setY(1);
   });
   container.on("pointerup", () => {
-    setBg(0x2a1e15);
+    paint(0x2a1e15);
     text.setY(0);
+    onPress();
   });
-  container.on("pointerup", onPress);
 
   return container;
 }
 
-function UNIMPLEMENTED(msg = "UNIMPLEMENTED") {
-  throw new Error(msg ? `UNIMPLEMENTED: ${msg}` : msg);
+// --- TRACK SCENE ---
+
+class TrackScene extends Phaser.Scene {
+  createTrack() {
+    this.graphics = this.add.graphics();
+    this.glowGraphics = this.add.graphics().setDepth(-1);
+    this.feedbackText = this.add
+      .text(0, 0, "", font(18, true))
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(5);
+
+    this.elapsedSeconds = 0;
+    this.previousTimestamp = performance.now() / 1e3;
+
+    /** @type {MorseSignalNote[]} */
+    this.notes = [];
+    this.noteIndex = 0;
+    /** @type {MorseSignalNote|null} */
+    this.currentDash = null;
+    this.currentPressTime = 0;
+
+    this.beatSeconds = BEAT_START_SECONDS;
+    this.gridOrigin = 0;
+    this.lastBeatIndex = -1;
+    this.sequenceDone = false;
+
+    this.bindTrackInput();
+    this.events.once("shutdown", () => this.destroyTrack());
+  }
+
+  destroyTrack() {
+    this.destroyLabels();
+  }
+
+  destroyLabels() {
+    for (const note of this.notes) destroyLabel(note);
+  }
+
+  metrics() {
+    const wide = STAGE.W > 600;
+    const lineX = Math.round(STAGE.W * (wide ? 0.3 : 0.25));
+    const gateH = wide ? 190 : 150;
+
+    return {
+      wide,
+      lineX,
+      speed: (STAGE.W - lineX) / RUNWAY_SECONDS,
+      gateY: Math.round(STAGE.H * 0.38),
+      gateH,
+      midY: Math.round(STAGE.H * 0.38) + Math.round(gateH / 2),
+      noteR: wide ? 13 : 10,
+      dashW: wide ? 68 : 52,
+      dashH: wide ? 24 : 18,
+      labelSize: wide ? 20 : 15,
+      labelY: Math.round(STAGE.H * 0.38) + gateH + 26,
+    };
+  }
+
+  bindTrackInput() {
+    this.input.keyboard.on("keydown", this.onKeyDown, this);
+    this.input.keyboard.on("keyup", this.onKeyUp, this);
+    this.input.on("pointerdown", this.onPointerDown, this);
+    this.input.on("pointerup", this.onPointerUp, this);
+    this.input.on("pointerupoutside", this.onPointerUp, this);
+  }
+
+  onKeyDown(event) {
+    if (event.code === "KeyM" && !event.repeat) {
+      const muted = toggleMute();
+      this.showFeedback(muted ? "MUTED" : "SOUND ON", COLOR.DIM);
+      return;
+    }
+    if (this.handleSpecialKey(event)) return;
+    if (event.repeat || !SEND_KEYS.has(event.code)) return;
+    event.preventDefault();
+    this.handlePress(this.gameTimeFromEvent(event.timeStamp));
+  }
+
+  onKeyUp(event) {
+    if (!SEND_KEYS.has(event.code)) return;
+    event.preventDefault();
+    this.handleRelease(this.gameTimeFromEvent(event.timeStamp));
+  }
+
+  handleSpecialKey() {
+    return false;
+  }
+
+  onPointerDown(pointer) {
+    if (this.handlePointerDown(pointer)) return;
+    this.handlePress(this.gameTimeFromEvent(pointer.event ? pointer.event.timeStamp : null));
+  }
+
+  handlePointerDown() {
+    return false;
+  }
+
+  onPointerUp(pointer) {
+    const stamp = pointer.event ? pointer.event.timeStamp : null;
+    this.handleRelease(this.gameTimeFromEvent(stamp));
+  }
+
+  // NOTE: Native timestamps avoid adding the frame delay from Phaser's input queue.
+  gameTimeFromEvent(timestamp) {
+    const seconds =
+      timestamp && timestamp > 1e12 ? performance.now() / 1e3 : timestamp ? timestamp / 1e3 : performance.now() / 1e3;
+    return seconds - this.previousTimestamp;
+  }
+
+  handlePress(eventTime) {
+    if (this.currentDash) return;
+
+    const note = this.notes[this.noteIndex];
+    if (!note) return;
+
+    const offset = eventTime - note.on;
+    if (Math.abs(offset) >= HIT_WINDOW_SECONDS) {
+      if (offset < -HIT_WINDOW_SECONDS && offset > -0.7) this.showFeedback("TOO EARLY", COLOR.DIM);
+      else if (offset > HIT_WINDOW_SECONDS) this.showFeedback("TOO LATE", COLOR.BAD);
+      return;
+    }
+
+    this.currentDash = note;
+    this.currentPressTime = eventTime;
+    note.dash ? SFX.dah(this) : SFX.dit(this);
+  }
+
+  handleRelease(eventTime) {
+    if (!this.currentDash) return;
+
+    const note = this.currentDash;
+    const holdTime = eventTime - this.currentPressTime;
+    const offset = this.currentPressTime - note.on;
+
+    let hit;
+    let reason = null;
+    if (note.dash) {
+      hit = holdTime >= DASH_MIN_SECONDS;
+      if (!hit) reason = "TOO SHORT";
+    } else {
+      hit = holdTime <= DOT_MAX_SECONDS;
+      if (!hit) reason = "TOO LONG";
+    }
+
+    this.resolveNote(note, hit, reason, offset);
+    this.currentDash = null;
+    this.currentPressTime = 0;
+  }
+
+  /**
+   * @param {MorseSignalNote} note
+   * @param {boolean} hit
+   * @param {string|null} [reason]
+   * @param {number|null} [offset]
+   */
+  resolveNote(note, hit, reason = null, offset = null) {
+    const stats = statsFor(note.letter);
+    stats.attempts++;
+    if (hit) stats.hits++;
+
+    this.recordResult(note, hit);
+
+    note.done = hit ? 1 : 2;
+    this.noteIndex++;
+
+    if (hit) {
+      const grade = offset === null ? "SENT" : gradeOffset(offset);
+      this.showFeedback(grade, grade === "PERFECT" ? COLOR.GOOD : COLOR.FG);
+    } else {
+      this.showFeedback(reason || "MISSED", COLOR.BAD);
+    }
+
+    persistSave();
+  }
+
+  recordResult() {}
+
+  tickTrack() {
+    const now = performance.now() / 1e3;
+    const previousElapsed = this.elapsedSeconds;
+    this.elapsedSeconds = Math.min(now - this.previousTimestamp, this.elapsedSeconds + 0.1);
+    this.previousTimestamp = now - this.elapsedSeconds;
+    const deltaSeconds = this.elapsedSeconds - previousElapsed;
+
+    while (
+      this.notes[this.noteIndex] &&
+      this.notes[this.noteIndex] !== this.currentDash &&
+      this.elapsedSeconds > this.notes[this.noteIndex].on + HIT_WINDOW_SECONDS
+    ) {
+      this.resolveNote(this.notes[this.noteIndex], false, "MISSED");
+    }
+
+    if (this.currentDash && this.elapsedSeconds - this.currentPressTime > DASH_FORCE_RESOLVE_SECONDS) {
+      const note = this.currentDash;
+      this.resolveNote(note, note.dash, note.dash ? null : "TOO LONG", this.currentPressTime - note.on);
+      this.currentDash = null;
+      this.currentPressTime = 0;
+    }
+
+    this.tickMetronome();
+
+    const last = this.notes[this.notes.length - 1];
+    if (
+      !this.sequenceDone &&
+      last &&
+      this.noteIndex >= this.notes.length &&
+      this.elapsedSeconds > last.on + HIT_WINDOW_SECONDS + 0.5
+    ) {
+      this.sequenceDone = true;
+      this.onSequenceComplete();
+    }
+
+    this.drawTrack(this.metrics());
+    return deltaSeconds;
+  }
+
+  tickMetronome() {
+    if (!saveData.tick || !this.gridOrigin) return;
+    const index = Math.floor((this.elapsedSeconds - this.gridOrigin) / this.beatSeconds);
+    if (index !== this.lastBeatIndex) {
+      this.lastBeatIndex = index;
+      if (index >= 0) SFX.tick(this);
+    }
+  }
+
+  onSequenceComplete() {}
+
+  drawTrack(metrics) {
+    const { lineX, speed, gateY, gateH, midY } = metrics;
+
+    this.graphics.clear();
+    this.glowGraphics.clear();
+
+    // Beat grid: makes the rhythm visible instead of something you have to feel out.
+    if (this.gridOrigin) {
+      const firstBeat = Math.floor((this.elapsedSeconds - this.gridOrigin) / this.beatSeconds);
+      for (let index = firstBeat; index < firstBeat + 12; index++) {
+        const beatTime = this.gridOrigin + index * this.beatSeconds;
+        const x = Math.round(lineX + (beatTime - this.elapsedSeconds) * speed);
+        if (x < lineX || x > STAGE.W) continue;
+        this.graphics.fillStyle(0xffffff, index % 4 === 0 ? 0.1 : 0.045).fillRect(x, gateY + 10, 1, gateH - 20);
+      }
+    }
+
+    // Runway rail.
+    this.graphics.fillStyle(0xffffff, 0.07).fillRect(lineX, midY, Math.max(0, STAGE.W - lineX), 1);
+
+    // Strike line.
+    this.graphics.fillStyle(0xffffff, 1).fillRect(lineX - 2, gateY, 4, gateH);
+
+    const upcoming = this.notes[this.noteIndex];
+    const proximity = upcoming
+      ? 1 - Phaser.Math.Clamp(Math.abs(upcoming.on - this.elapsedSeconds) / HIT_WINDOW_SECONDS, 0, 1)
+      : 0;
+    if (upcoming) {
+      this.glowGraphics
+        .fillStyle(0xffbb44, 0.05 + proximity * 0.16)
+        .fillRect(lineX - 16, gateY - 8, 34, gateH + 16);
+    }
+
+    for (const note of this.notes) {
+      const x = Math.round(lineX + (note.on - this.elapsedSeconds) * speed);
+      const visible = x > -80 && x < STAGE.W + 80;
+
+      if (note.label) {
+        note.label.setPosition(x, metrics.labelY).setVisible(visible);
+      }
+      if (!visible) continue;
+
+      this.graphics.fillStyle(note.done === 1 ? 0x44aa44 : note.done === 2 ? 0xaa4444 : 0xffbb44);
+      if (note.dash) {
+        this.graphics.fillRect(x - metrics.dashW / 2, midY - metrics.dashH / 2, metrics.dashW, metrics.dashH);
+      } else {
+        this.graphics.fillCircle(x, midY, metrics.noteR);
+      }
+    }
+  }
+
+  /**
+   * @param {MorseSignalNote} note
+   * @param {string} text
+   */
+  addNoteLabel(note, text) {
+    const metrics = this.metrics();
+    note.label = this.add
+      .text(0, metrics.labelY, text, font(metrics.labelSize))
+      .setOrigin(0.5, 0);
+  }
+
+  showFeedback(text, color) {
+    const metrics = this.metrics();
+    this.tweens.killTweensOf(this.feedbackText);
+    this.feedbackText
+      .setText(text)
+      .setColor(color)
+      .setPosition(metrics.lineX, metrics.gateY - 34)
+      .setAlpha(1)
+      .setY(metrics.gateY - 34);
+
+    this.tweens.add({
+      targets: this.feedbackText,
+      alpha: 0,
+      y: metrics.gateY - 56,
+      duration: 700,
+      ease: "Quad.easeOut",
+    });
+  }
+}
+
+/**
+ * @param {number} offset
+ * @returns {"PERFECT"|"GOOD"|"OK"}
+ */
+function gradeOffset(offset) {
+  const absolute = Math.abs(offset);
+  if (absolute <= 0.09) return "PERFECT";
+  if (absolute <= 0.17) return "GOOD";
+  return "OK";
 }
 
 // --- SCENE: Menu ---
 
 class Menu extends Phaser.Scene {
-  constructor() { super("Menu"); }
+  constructor() {
+    super("Menu");
+  }
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
-    // Logo
-    this.add.text(W / 2, H / 8 + 44 * 0, "THE", { fontFamily: "monospace", fontSize: "28px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
-    this.add.text(W / 2, H / 8 + 44 * 1, "TELEGRAPHIST", { fontFamily: "monospace", fontSize: "48px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
-    this.add.text(W / 2, H / 8 + 44 * 2, "- .... .", { fontFamily: "monospace", fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
-    this.add.text(W / 2, H / 8 + 44 * 2.5, "- . .-.. . --. .-. .- .--. .... .. ... -", { fontFamily: "monospace", fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
+    const centerX = STAGE.W / 2;
+    const scale = STAGE.W > 600 ? 1.15 : 1;
 
-    this.add.text(W / 2, H / 2 - 34, "DIT  .  TAP / QUICK PRESS", {
-      ...FONT, fontSize: "16px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
-    this.add.text(W / 2, H / 2 + 4, "DAH  -  PRESS AND HOLD", {
-      ...FONT, fontSize: "16px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
-    this.add.text(W / 2, H / 2 + 54, "TIME EACH SIGNAL TO THE LINE", {
-      ...FONT, fontSize: "13px", color: COLOR.FG,
-    }).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.11, "THE", font(28 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.11 + 44 * scale, "TELEGRAPHIST", font(48 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.11 + 88 * scale, "- .... .", font(12 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.11 + 110 * scale, "- . .-.. . --. .-. .- .--. .... .. ... -", font(12 * scale, true)).setOrigin(0.5);
 
-    const go = () => { SFX.start(this); this.scene.start("Play"); };
-    makeActionButton(this, W / 2, H - 132, "CLOCK IN", go);
-    makeActionButton(this, W / 2, H - 76, "HOW TO PLAY", () => this.scene.start("Tutorial"));
-    this.input.keyboard.once("keydown-SPACE", go);
+    this.add.text(centerX, STAGE.H * 0.44, "DIT  .  TAP / QUICK PRESS", font(16 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.49, "DAH  -  PRESS AND HOLD", font(16 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.55, "TIME EACH SIGNAL TO THE LINE", font(13 * scale)).setOrigin(0.5);
+
+    if (saveData.best > 0) {
+      this.add.text(centerX, STAGE.H * 0.62, `BEST ${saveData.best}`, font(13 * scale)).setOrigin(0.5).setColor(COLOR.DIM);
+    }
+
+    const go = () => {
+      SFX.start(this);
+      this.scene.start("Play");
+    };
+    makeActionButton(this, centerX, STAGE.H * 0.8, "CLOCK IN", go);
+    makeActionButton(this, centerX, STAGE.H * 0.89, "HOW TO PLAY", () => this.scene.start("Tutorial"));
+
+    this.add.text(centerX, STAGE.H - 22, "SPACE OR TAP TO CLOCK IN", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
+    this.input.keyboard.on("keydown-SPACE", go);
+    this.input.keyboard.on("keydown-ENTER", go);
   }
 }
 
 // --- SCENE: Tutorial ---
 
 class Tutorial extends Phaser.Scene {
-  constructor() { super("Tutorial"); }
+  constructor() {
+    super("Tutorial");
+  }
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
-    this.add.text(W / 2, 100, "HOW TO SEND MORSE", {
-      ...FONT, fontSize: "24px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
 
-    this.add.text(W / 2, 190, "WATCH THE SIGNAL MOVE TOWARD THE LINE", {
-      ...FONT, fontSize: "14px", color: COLOR.FG, align: "center",
-    }).setOrigin(0.5);
-    this.add.text(W / 2, 250, "PRESS AS IT REACHES THE LINE", {
-      ...FONT, fontSize: "14px", color: COLOR.FG, align: "center",
-    }).setOrigin(0.5);
+    const centerX = STAGE.W / 2;
+    const scale = STAGE.W > 600 ? 1.1 : 1;
 
-    this.add.text(W / 2, 340, "DIT   .   TAP OR PRESS BRIEFLY", {
-      ...FONT, fontSize: "17px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
-    this.add.text(W / 2, 395, "DAH   -   PRESS AND HOLD", {
-      ...FONT, fontSize: "17px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.13, "HOW TO SEND MORSE", font(24 * scale, true)).setOrigin(0.5);
 
-    this.add.text(W / 2, 475, "Example: A = .-   (DIT, then DAH)", {
-      ...FONT, fontSize: "15px", color: COLOR.FG, align: "center",
-    }).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.26, "WATCH THE SIGNAL MOVE TOWARD THE LINE", font(14 * scale)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.33, "PRESS AS IT REACHES THE LINE", font(14 * scale)).setOrigin(0.5);
 
-    makeActionButton(this, W / 2, 570, "START SENDING", () => {
+    this.add.text(centerX, STAGE.H * 0.45, "DIT   .   TAP OR PRESS BRIEFLY", font(17 * scale, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.52, "DAH   -   PRESS AND HOLD", font(17 * scale, true)).setOrigin(0.5);
+
+    this.add.text(centerX, STAGE.H * 0.62, "Example: A = .-   (DIT, then DAH)", font(15 * scale)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.68, "Every clean word unlocks more letters.", font(13 * scale)).setOrigin(0.5).setColor(COLOR.DIM);
+
+    makeActionButton(this, centerX, STAGE.H * 0.78, "PRACTICE FIRST", () => {
+      SFX.start(this);
+      this.scene.start("Practice");
+    });
+    makeActionButton(this, centerX, STAGE.H * 0.86, "START SENDING", () => {
       SFX.start(this);
       this.scene.start("Play");
     });
-    makeActionButton(this, W / 2, 626, "BACK", () => this.scene.start("Menu"));
+    makeActionButton(this, centerX, STAGE.H * 0.94, "BACK", () => this.scene.start("Menu"), 160);
+
+    this.input.keyboard.on("keydown-ESC", () => this.scene.start("Menu"));
+  }
+}
+
+// --- SCENE: Practice ---
+
+class Practice extends TrackScene {
+  constructor() {
+    super("Practice");
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor(COLOR.BG);
+
+    this.stepIndex = 0;
+    this.steps = ["E", "T", "A"];
+    this.stepFailed = false;
+
+    this.headerText = this.add.text(STAGE.W / 2, STAGE.H * 0.09, "", font(22, true)).setOrigin(0.5);
+    this.hintText = this.add.text(STAGE.W / 2, STAGE.H * 0.17, "", font(16)).setOrigin(0.5).setColor(COLOR.DIM);
+    this.actionText = this.add.text(STAGE.W / 2, STAGE.H * 0.25, "", font(26, true)).setOrigin(0.5);
+
+    this.createTrack();
+
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.82, "START SENDING", () => {
+      SFX.start(this);
+      this.scene.start("Play");
+    });
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.9, "BACK", () => this.scene.start("Tutorial"), 160);
+
+    this.scheduleStep();
+  }
+
+  scheduleStep() {
+    this.destroyLabels();
+    this.notes = [];
+    this.noteIndex = 0;
+    this.currentDash = null;
+    this.stepFailed = false;
+    this.sequenceDone = false;
+
+    if (this.stepIndex >= this.steps.length) {
+      this.headerText.setText("NICE SENDING");
+      this.hintText.setText("YOU KNOW THE THREE BASIC SIGNALS");
+      this.actionText.setText("CLOCK IN WHEN READY");
+      this.gridOrigin = 0;
+      SFX.unlock(this);
+      return;
+    }
+
+    const letter = this.steps[this.stepIndex];
+    const code = MORSE_CODE[letter];
+    const start = this.elapsedSeconds + 1.9;
+
+    this.gridOrigin = start;
+    this.lastBeatIndex = -1;
+    this.beatSeconds = 0.8;
+
+    this.headerText.setText(`PRACTICE ${this.stepIndex + 1} / ${this.steps.length}    ${letter}  ${code}`);
+    this.hintText.setText("TAP AS IT REACHES THE LINE");
+    this.actionText.setText(code.split("").map((signal) => (signal === "." ? "TAP" : "HOLD")).join("   "));
+
+    [...code].forEach((signal, index) => {
+      /** @type {MorseSignalNote} */
+      const note = { letter, on: start + index * this.beatSeconds, dash: signal === "-" };
+      if (index === 0) this.addNoteLabel(note, `${letter}  ${code}`);
+      this.notes.push(note);
+    });
+  }
+
+  recordResult(note, hit) {
+    if (hit) {
+      SFX.good(this);
+      return;
+    }
+
+    SFX.miss(this);
+    this.stepFailed = true;
+    this.destroyLabels();
+    this.notes = [];
+    this.noteIndex = 0;
+    this.currentDash = null;
+    this.hintText.setText("TRY THAT ONE AGAIN");
+    this.actionText.setText("LISTEN FOR THE BEAT");
+
+    this.time.delayedCall(1200, () => {
+      if (this.scene.isActive()) this.scheduleStep();
+    });
+  }
+
+  onSequenceComplete() {
+    this.stepIndex++;
+    this.time.delayedCall(700, () => {
+      if (this.scene.isActive()) this.scheduleStep();
+    });
+  }
+
+  handleSpecialKey(event) {
+    if (event.code === "Escape") {
+      this.scene.start("Tutorial");
+      return true;
+    }
+    return false;
+  }
+
+  update() {
+    this.tickTrack();
   }
 }
 
 // --- SCENE: Play ---
 
-class Play extends Phaser.Scene {
+class Play extends TrackScene {
   constructor() {
     super("Play");
-    this.unlockedLetterCount = 4;
   }
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
-    this.graphics = this.add.graphics();
-    this.statusText = this.add.text(10, 10, "", { ...FONT, color: COLOR.FG });
+    this.unlockedLetterCount = 4;
+    this.quality = 100;
+    this.score = 0;
+    this.telegramCount = 0;
+    this.beatSeconds = BEAT_START_SECONDS;
     this.wordHistory = [];
-    this.wordHistoryText = this.add.text(W - 10, 10, "", {
-      ...FONT,
-      fontSize: "12px",
-      color: COLOR.FG,
-      align: "right",
-      lineSpacing: 3,
-    }).setOrigin(1, 0).setDepth(2);
-    this.pauseButton = this.add.text(W - 10, 96, "[ PAUSE ]", {
-      ...FONT,
-      fontSize: "12px",
-      color: COLOR.FG,
-      backgroundColor: "#1a120d",
-      padding: { x: 7, y: 5 },
-    }).setOrigin(1, 0).setDepth(2);
-    this.pauseButtonBounds = new Phaser.Geom.Rectangle(W - 100, 92, 90, 30);
-    this.glowGraphics = this.add.graphics().setDepth(-1);
-    this.backgroundShader = null;
 
+    this.backgroundShader = null;
     if (this.game.renderer.type === Phaser.WEBGL) {
       const shaderKey = "dit-dah-play-background";
-      this.cache.shader.add(shaderKey, new Phaser.Display.BaseShader(shaderKey, PLAY_BACKGROUND_SHADER));
-      this.backgroundShader = this.add.shader(shaderKey, W / 2, H / 2, W, H).setDepth(-2);
+      if (!this.cache.shader.exists(shaderKey)) {
+        this.cache.shader.add(shaderKey, new Phaser.Display.BaseShader(shaderKey, PLAY_BACKGROUND_SHADER));
+      }
+      this.backgroundShader = this.add
+        .shader(shaderKey, STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H)
+        .setDepth(-2);
     }
 
-    this.elapsedSeconds = 0;
-    this.previousTimestamp = performance.now() / 1e3;
+    this.createTrack();
 
-    this.noteIndex = 0;
-    /** @type {MorseSignalNote[]} */
-    this.notes = [];
-    this.quality = 100;
-    this.score = 1;
-    /** @type {MorseSignalNote|null} */
-    this.currentDash = null; // null; was 0
-    this.currentPressTime = 0;
+    this.statusText = this.add.text(16, 14, "", font(16)).setDepth(2);
+    this.wordHistoryText = this.add
+      .text(STAGE.W - 16, 14, "", { ...font(13), align: "right", lineSpacing: 4 })
+      .setOrigin(1, 0)
+      .setDepth(2);
 
-    this.input.keyboard.on("keydown", (event) => {
-      if (event.code === "Escape" || event.code === "KeyP") {
-        this.pauseGame();
-        return;
-      }
-      if (!event.repeat) this.handlePress(this.gameTimeFromEvent(event.timeStamp));
-    });
-    this.input.keyboard.on("keyup", (event) => this.handleRelease(this.gameTimeFromEvent(event.timeStamp)));
-    this.input.on("pointerdown", (pointer) => {
-      if (this.pauseButtonBounds.contains(pointer.x, pointer.y)) {
-        this.pauseGame();
-        return;
-      }
-      this.handlePress(this.gameTimeFromEvent(pointer.event.timeStamp));
-    });
-    this.input.on("pointerup", (pointer) => this.handleRelease(this.gameTimeFromEvent(pointer.event.timeStamp)));
+    this.pauseButton = this.add
+      .text(STAGE.W - 16, 112, "[ PAUSE ]", { ...font(13), backgroundColor: "#1a120d", padding: { x: 7, y: 5 } })
+      .setOrigin(1, 0)
+      .setDepth(2);
+    this.pauseButtonBounds = new Phaser.Geom.Rectangle(STAGE.W - 106, 108, 96, 30);
+
+    this.telegramText = this.add
+      .text(STAGE.W / 2, STAGE.H * 0.78, "", font(16, true))
+      .setOrigin(0.5)
+      .setColor(COLOR.DIM)
+      .setDepth(2);
 
     this.scheduleWord();
+    startAmbience();
+
+    this.events.once("shutdown", () => stopAmbience());
   }
 
   update() {
-    {
-      const now = performance.now() / 1e3;
-      const previousElapsed = this.elapsedSeconds;
-      this.elapsedSeconds = Math.min(now - this.previousTimestamp, this.elapsedSeconds + 0.1);
-      this.previousTimestamp = now - this.elapsedSeconds;
-      const deltaSeconds = this.elapsedSeconds - previousElapsed;
+    const deltaSeconds = this.tickTrack();
 
-      {
-        while (
-          this.notes[this.noteIndex] &&
-          this.notes[this.noteIndex] !== this.currentDash &&
-          this.elapsedSeconds > this.notes[this.noteIndex].on + HIT_WINDOW_SECONDS
-        ) {
-          this.resolveNote(this.notes[[this.noteIndex]], false);
-        }
+    this.quality = Math.min(100, this.quality + deltaSeconds * QUALITY_REGEN_PER_SECOND);
+    this.statusText.setText(
+      `SCORE ${this.score}    QUALITY ${Math.max(0, this.quality | 0)}    LETTERS ${LETTER_ORDER.slice(0, this.unlockedLetterCount)}`
+    );
 
-        if (this.currentDash && this.elapsedSeconds - this.currentPressTime > DASH_FORCE_RESOLVE_SECONDS) {
-          const hit = this.currentDash.dash ? true : false;
-          this.resolveNote(this.currentDash, hit);
-          this.currentDash = null;
-        }
-
-        if (this.noteIndex >= this.notes.length && this.elapsedSeconds > this.notes.at(-1).on + 1) {
-          if (
-            this.unlockedLetterCount < 12 &&
-            [...LETTER_ORDER.slice(0, this.unlockedLetterCount)].every(isMastered)
-          ) {
-            this.unlockedLetterCount += 4;
-          }
-          this.scheduleWord();
-        }
-      }
-
-      this.quality = Math.min(100, this.quality + deltaSeconds * 2);
-      if (this.quality <= 0) {
-        SFX.over(this);
-        this.scene.start("Over", { score: this.score });
-        return;
-      }
+    if (this.quality <= 0) {
+      SFX.over(this);
+      this.scene.start("Over", { score: this.score });
     }
 
-    {
-      const gateY = 210;
-      const gateHeight = 90;
-      this.graphics.clear().fillStyle(0xffffff).fillRect(TIMING_LINE_X, gateY, 2, gateHeight);
-      const upcomingNote = this.notes[this.noteIndex];
-      const proximity = upcomingNote
-        ? 1 - Phaser.Math.Clamp(Math.abs(upcomingNote.on - this.elapsedSeconds) / HIT_WINDOW_SECONDS, 0, 1)
-        : 0;
-      this.glowGraphics.clear();
-      if (upcomingNote) {
-        this.glowGraphics
-          .fillStyle(0xffbb44, 0.04 + proximity * 0.14)
-          .fillRect(TIMING_LINE_X - 12, gateY - 6, 26, gateHeight + 12);
-      }
-      for (const note of this.notes) {
-        const noteX = Math.round(TIMING_LINE_X + (note.on - this.elapsedSeconds) * 120);
-        const isVisible = noteX > -40 && noteX < 520;
-        const labelY = gateY + gateHeight / 2 + 20;
-        const shouldHideMasteredLabel = HIDE_MASTERED_LABELS && isMastered(note.letter);
-        if (note.label) note.label.setPosition(noteX - 10, labelY).setVisible(isVisible && !shouldHideMasteredLabel);
-        if (!isVisible) continue;
-        this.graphics.fillStyle(note.done === 1 ? 0x44aa44 : note.done === 2 ? 0xaa4444 : 0xffbb44);
-        if (note.dash) this.graphics.fillRect(noteX - 20, gateY + 15, 40, 16);
-        else this.graphics.fillCircle(noteX, gateY + 23, 8);
-      }
-      this.statusText.setText(`score ${this.score}    quality ${this.quality | 0}    letters ${LETTER_ORDER.slice(0, this.unlockedLetterCount)}`)
-      if (this.backgroundShader) this.backgroundShader.setUniform("time", this.elapsedSeconds);
+    if (this.backgroundShader) this.backgroundShader.setUniform("time", this.elapsedSeconds);
+  }
+
+  relayout() {
+    this.statusText.setPosition(16, 14);
+    this.wordHistoryText.setPosition(STAGE.W - 16, 14);
+    this.pauseButton.setPosition(STAGE.W - 16, 112);
+    this.pauseButtonBounds.setTo(STAGE.W - 106, 108, 96, 30);
+    this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
+    if (this.backgroundShader) {
+      this.backgroundShader.setPosition(STAGE.W / 2, STAGE.H / 2).setDisplaySize(STAGE.W, STAGE.H);
     }
   }
 
   scheduleWord() {
-    this.notes.forEach((note) => note.label && note.label.destroy());
+    this.destroyLabels();
     const unlockedLetters = LETTER_ORDER.slice(0, this.unlockedLetterCount);
     const eligibleWords = WORDS.filter((word) => [...word].every((letter) => unlockedLetters.includes(letter)));
-    let nextNoteTime = this.elapsedSeconds + 2;
+    if (!eligibleWords.length) return;
+
+    // Open with two short telegrams so the first minute is not a wall of notes.
+    let pool = eligibleWords;
+    if (this.telegramCount < 2) {
+      const drills = eligibleWords.filter((word) => word.length <= 3);
+      if (drills.length) pool = drills;
+    }
+
+    const word = pool[Math.floor(Math.random() * pool.length)];
+    const start = this.elapsedSeconds + LEAD_IN_SECONDS;
+
     this.notes = [];
     this.noteIndex = 0;
+    this.currentDash = null;
+    this.sequenceDone = false;
+    this.gridOrigin = start;
+    this.lastBeatIndex = -1;
 
-    for (const letter of eligibleWords[Math.random() * eligibleWords.length | 0]) {
+    let nextNoteTime = start;
+    for (const letter of word) {
       [...MORSE_CODE[letter]].forEach((signal, signalIndex) => {
         /** @type {MorseSignalNote} */
         const note = { letter, on: nextNoteTime, dash: signal === "-" };
-        if (!signalIndex) note.label = this.add.text(0, 245, letter + " " + MORSE_CODE[letter], { ...FONT, color: COLOR.FG });
+        if (!signalIndex) this.addNoteLabel(note, `${letter}  ${MORSE_CODE[letter]}`);
         this.notes.push(note);
-        nextNoteTime += BEAT_SECONDS;
+        nextNoteTime += this.beatSeconds;
       });
-      nextNoteTime += BEAT_SECONDS;
+      nextNoteTime += this.beatSeconds;
     }
-    const word = this.notes.map((note) => note.letter)
-      .filter((letter, index, letters) => index === 0 || letter !== letters[index - 1])
-      .join("");
+
     this.wordHistory.push(word);
     this.wordHistory = this.wordHistory.slice(-WORD_HISTORY_LIMIT);
     this.wordHistoryText.setText(this.wordHistory.join("\n"));
+    this.telegramText.setText(`SENDING  ${word}`);
+
+    this.telegramCount++;
+    this.beatSeconds = Math.max(BEAT_MIN_SECONDS, this.beatSeconds - BEAT_STEP_SECONDS);
   }
 
-  handlePress(eventTime) {
-    if (this.currentDash) return;
+  onSequenceComplete() {
+    if (this.unlockedLetterCount < LETTER_ORDER.length) {
+      const current = LETTER_ORDER.slice(0, this.unlockedLetterCount).split("");
+      if (current.every(isMastered)) {
+        this.unlockedLetterCount = Math.min(LETTER_ORDER.length, this.unlockedLetterCount + 4);
+        const unlocked = LETTER_ORDER.slice(0, this.unlockedLetterCount).split("").join(" ");
+        this.showBanner(`NEW LETTERS  ${unlocked}`);
+        SFX.unlock(this);
+      }
+    }
 
-    /**@type { MorseSignalNote }*/
-    const note = this.notes[this.noteIndex];
-    if (!note || Math.abs(eventTime - note.on) >= HIT_WINDOW_SECONDS) return;
+    this.time.delayedCall(600, () => {
+      if (this.scene.isActive()) this.scheduleWord();
+    });
+  }
 
-    if (note.dash) {
-      SFX.dah(this);
-      this.currentDash = note;
-      this.currentPressTime = eventTime;
+  recordResult(note, hit) {
+    if (hit) {
+      this.score += 10;
+      SFX.good(this);
       return;
     }
 
-    // A dot is only valid if released quickly. If the press is held long enough
-    // to behave like a dash, it should count as a miss instead of passing.
-    SFX.dit(this);
-    this.currentDash = note;
-    this.currentPressTime = eventTime;
+    this.quality -= QUALITY_MISS_PENALTY;
+    SFX.miss(this);
+    if (!REDUCED_MOTION) this.cameras.main.shake(100, 0.004);
   }
 
-  handleRelease(eventTime) {
-    if (!this.currentDash) return;
+  showBanner(text) {
+    const banner = this.add
+      .text(STAGE.W / 2, STAGE.H * 0.24, text, font(20, true))
+      .setOrigin(0.5)
+      .setColor(COLOR.GOOD)
+      .setDepth(4);
 
-    const holdTime = eventTime - this.currentPressTime;
-    const hit = this.currentDash.dash
-      ? holdTime >= DASH_MIN_SECONDS
-      : holdTime <= DOT_MAX_SECONDS;
+    this.tweens.add({
+      targets: banner,
+      alpha: 0,
+      y: STAGE.H * 0.24 - 24,
+      duration: 1600,
+      ease: "Quad.easeOut",
+      onComplete: () => banner.destroy(),
+    });
+  }
 
-    this.resolveNote(this.currentDash, hit);
-    this.currentDash = null;
-    this.currentPressTime = 0;
+  handleSpecialKey(event) {
+    if (event.code === "Escape" || event.code === "KeyP") {
+      this.pauseGame();
+      return true;
+    }
+    return false;
+  }
+
+  handlePointerDown(pointer) {
+    if (this.pauseButtonBounds.contains(pointer.x, pointer.y)) {
+      this.pauseGame();
+      return true;
+    }
+    return false;
   }
 
   pauseGame() {
+    if (!this.scene.isActive() || this.scene.isPaused()) return;
+    stopAmbience();
     this.scene.launch("Pause");
     this.scene.pause();
-  }
-
-  /**
-   * @param {MorseSignalNote} note 
-   * @param {boolean} hit 
-   */
-  resolveNote(note, hit) {
-    const stats = statsFor(note.letter);
-    stats.attempts++;
-    if (hit) {
-      stats.hits++;
-      this.score += 10;
-      SFX.good(this);
-    } else {
-      this.quality -= 10;
-      SFX.miss(this);
-      this.cameras.main.shake(100, 0.004);
-    }
-    note.done = hit ? 1 : 2;
-    this.noteIndex++;
-  }
-
-  // NOTE: Native timestamps avoid adding the frame delay from Phaser's input queue.
-  gameTimeFromEvent(timestamp) {
-    return (timestamp > 1e12 ? performance.now() : timestamp) / 1e3 - this.previousTimestamp;
   }
 }
 
 // --- SCENE: Pause ---
 
 class Pause extends Phaser.Scene {
-  constructor() { super("Pause"); }
+  constructor() {
+    super("Pause");
+  }
 
   create() {
-    this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.78);
-    this.add.text(W / 2, 220, "LINE PAUSED", {
-      ...FONT, fontSize: "28px", color: COLOR.FG, fontStyle: "bold",
-    }).setOrigin(0.5);
+    this.add.rectangle(STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H, 0x000000, 0.78);
+    this.add.text(STAGE.W / 2, STAGE.H * 0.26, "LINE PAUSED", font(28, true)).setOrigin(0.5);
 
     const resume = () => {
       const playScene = this.scene.get("Play");
       playScene.previousTimestamp = performance.now() / 1e3 - playScene.elapsedSeconds;
       this.scene.stop();
       this.scene.resume("Play");
+      startAmbience();
     };
-    makeActionButton(this, W / 2, 320, "RESUME", resume);
-    makeActionButton(this, W / 2, 380, "MAIN MENU", () => {
+
+    const soundButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.5, this.soundLabel(), () => {
+      toggleMute();
+      soundButton.labelText.setText(this.soundLabel());
+    });
+
+    const tickButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.58, this.tickLabel(), () => {
+      saveData.tick = !saveData.tick;
+      persistSave();
+      tickButton.labelText.setText(this.tickLabel());
+    });
+
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.42, "RESUME", resume);
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.66, "MAIN MENU", () => {
       this.scene.stop("Play");
       this.scene.start("Menu");
     });
 
+    this.add.text(STAGE.W / 2, STAGE.H * 0.85, "ESC / P  RESUME     M  MUTE", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
+
     this.input.keyboard.on("keydown", (event) => {
       if (event.code === "Escape" || event.code === "KeyP") resume();
-      if (event.code === "KeyM") {
-        this.scene.stop("Play");
-        this.scene.start("Menu");
+      if (event.code === "KeyM" && !event.repeat) {
+        toggleMute();
+        soundButton.labelText.setText(this.soundLabel());
       }
     });
   }
-}
 
-/**
- * 
- * @param {string} letter 
- * @returns {LetterStat}
- */
-const statsFor = (letter) => letterStats[letter] || (letterStats[letter] = { attempts: 0, hits: 0 });
+  soundLabel() {
+    return saveData.mute ? "SOUND: OFF" : "SOUND: ON";
+  }
 
-/**
- * @param {string} letter 
- * @returns {boolean}
- */
-const isMastered = (letter) => {
-  /** @type {LetterStat} */
-  const stats = statsFor(letter);
-  return stats.attempts >= 5 && stats.hits / stats.attempts >= 0.75;
+  tickLabel() {
+    return saveData.tick ? "BEAT TICK: ON" : "BEAT TICK: OFF";
+  }
 }
 
 // --- SCENE: Over ---
 
 class Over extends Phaser.Scene {
-  constructor() { super("Over"); }
+  constructor() {
+    super("Over");
+  }
 
   init(data) {
     this.finalScore = data.score ?? 0;
@@ -649,26 +1182,84 @@ class Over extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
-    this.add.text(W / 2, 65 + 50 * 0, "LINE DEAD", { ...FONT, fontSize: "28px", color: COLOR.FG }).setOrigin(0.5);
-    this.add.text(W / 2, 65 + 50 * 1, `FINAL SCORE ${this.finalScore}`, { ...FONT, color: COLOR.FG }).setOrigin(0.5);
+    if (this.finalScore > saveData.best) {
+      saveData.best = this.finalScore;
+      persistSave();
+    }
 
-    makeActionButton(this, W / 2, 300, "RETRY", () => this.scene.start("Play"));
-    makeActionButton(this, W / 2, 360, "MENU", () => this.scene.start("Menu"));
+    const centerX = STAGE.W / 2;
+    this.add.text(centerX, STAGE.H * 0.13, "LINE DEAD", font(28, true)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.21, `FINAL SCORE ${this.finalScore}`, font(18)).setOrigin(0.5);
+    this.add.text(centerX, STAGE.H * 0.26, `BEST ${saveData.best}`, font(14)).setOrigin(0.5).setColor(COLOR.DIM);
+
+    const weak = Object.entries(letterStats)
+      .filter(([, stats]) => stats.attempts >= 3)
+      .map(([letter, stats]) => [letter, stats.hits / stats.attempts])
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 3)
+      .map(([letter, ratio]) => `${letter} ${Math.round(ratio * 100)}%`)
+      .join("   ");
+
+    if (weak) {
+      this.add.text(centerX, STAGE.H * 0.33, `WEAKEST: ${weak}`, font(14)).setOrigin(0.5).setColor(COLOR.DIM);
+    }
+
+    makeActionButton(this, centerX, STAGE.H * 0.52, "RETRY", () => this.scene.start("Play"));
+    makeActionButton(this, centerX, STAGE.H * 0.61, "MENU", () => this.scene.start("Menu"), 160);
+
+    this.add.text(centerX, STAGE.H * 0.72, "SPACE  RETRY     ESC  MENU", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
 
     this.input.keyboard.once("keydown-SPACE", () => this.scene.start("Play"));
-    this.input.keyboard.once("keydown-M", () => this.scene.start("Menu"));
+    this.input.keyboard.once("keydown-ESC", () => this.scene.start("Menu"));
   }
 }
 
-// --- Entry Point Boot Game ---
+// --- RESIZE ---
 
-new Phaser.Game(
-  {
-    type: Phaser.AUTO,
-    width: W,
-    height: H,
-    backgroundColor: COLOR.BG,
-    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-    scene: [Menu, Tutorial, Play, Pause, Over],
-  }
-);
+function applyStage(next) {
+  if (next.W === STAGE.W) return false;
+  STAGE.W = next.W;
+  STAGE.wide = next.wide;
+  game.scale.resize(STAGE.W, STAGE.H);
+  // FIT caches both the aspect ratio and the parent bounds from boot, so re-apply them.
+  game.scale.displaySize.setAspectRatio(STAGE.W / STAGE.H);
+  game.scale.getParentBounds();
+  game.scale.refresh();
+  return true;
+}
+
+let resizeTimer = null;
+
+window.addEventListener("resize", () => {
+  if (resizeTimer) window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    resizeTimer = null;
+    if (!applyStage(computeStage())) return;
+
+    for (const scene of game.scene.getScenes(true)) {
+      if (scene.relayout) scene.relayout();
+      else scene.scene.restart();
+    }
+
+    const playScene = game.scene.getScene("Play");
+    if (playScene && playScene.scene.isPaused() && playScene.relayout) playScene.relayout();
+  }, 180);
+});
+
+// Pause when the tab loses focus so a run cannot die in the background.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) return;
+  const playScene = game.scene.getScene("Play");
+  if (playScene && playScene.scene.isActive()) playScene.pauseGame();
+});
+
+// --- ENTRY POINT ---
+
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  width: STAGE.W,
+  height: STAGE.H,
+  backgroundColor: COLOR.BG,
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  scene: [Menu, Tutorial, Practice, Play, Pause, Over],
+});
