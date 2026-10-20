@@ -184,7 +184,8 @@ function tone(scene, freq, dur, waveType, gain, slide, delay) {
 function noise(scene, dur, gain, freq, q) {
   if (saveData.mute) return;
   const ctx = ctxOf(scene);
-  if (!ctx) return;
+  const out = ctx && scene.sound.destination;
+  if (!ctx || !out) return;
 
   const length = Math.max(1, Math.floor(ctx.sampleRate * dur));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
