@@ -455,6 +455,9 @@ class TrackScene extends Phaser.Scene {
   }
 
   bindTrackInput() {
+    // Captures are global (and are not removed on plugin shutdown by design);
+    // preventDefault is handled by the keyboard manager, not per event.
+    this.input.keyboard.addCapture("SPACE,ENTER,J,F");
     this.input.keyboard.on("keydown", this.onKeyDown, this);
     this.input.keyboard.on("keyup", this.onKeyUp, this);
     this.input.on("pointerdown", this.onPointerDown, this);
@@ -470,13 +473,11 @@ class TrackScene extends Phaser.Scene {
     }
     if (this.handleSpecialKey(event)) return;
     if (event.repeat || !SEND_KEYS.has(event.code)) return;
-    event.preventDefault();
     this.handlePress(this.gameTimeFromEvent(event.timeStamp));
   }
 
   onKeyUp(event) {
     if (!SEND_KEYS.has(event.code)) return;
-    event.preventDefault();
     this.handleRelease(this.gameTimeFromEvent(event.timeStamp));
   }
 
