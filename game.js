@@ -484,9 +484,10 @@ class TrackScene extends Phaser.Scene {
     return false;
   }
 
-  onPointerDown(pointer) {
-    if (this.handlePointerDown(pointer)) return;
-    this.handlePress(this.gameTimeFromEvent(pointer.event ? pointer.event.timeStamp : null));
+  onPointerDown(pointer, over) {
+    if (this.handlePointerDown(pointer, over)) return;
+    // Native pointer timestamps avoid the frame delay from Phaser's input queue.
+    this.handlePress(this.gameTimeFromEvent(pointer.downTime || performance.now()));
   }
 
   handlePointerDown() {
@@ -494,8 +495,8 @@ class TrackScene extends Phaser.Scene {
   }
 
   onPointerUp(pointer) {
-    const stamp = pointer.event ? pointer.event.timeStamp : null;
-    this.handleRelease(this.gameTimeFromEvent(stamp));
+    // See the note above; upTime can be 0 for a pointer that was never down.
+    this.handleRelease(this.gameTimeFromEvent(pointer.upTime || performance.now()));
   }
 
   // NOTE: Native timestamps avoid adding the frame delay from Phaser's input queue.
@@ -941,8 +942,8 @@ class Play extends TrackScene {
     this.pauseButton = this.add
       .text(STAGE.W - 16, 112, "[ PAUSE ]", { ...font(13), backgroundColor: "#1a120d", padding: { x: 7, y: 5 } })
       .setOrigin(1, 0)
-      .setDepth(2);
-    this.pauseButtonBounds = new Phaser.Geom.Rectangle(STAGE.W - 106, 108, 96, 30);
+      .setDepth(2)
+      .setInteractive({ useHandCursor: true });
 
     this.telegramText = this.add
       .text(STAGE.W / 2, STAGE.H * 0.78, "", font(16, true))
@@ -989,7 +990,6 @@ class Play extends TrackScene {
     this.statusText.setPosition(16, 14);
     this.wordHistoryText.setPosition(STAGE.W - 16, 14);
     this.pauseButton.setPosition(STAGE.W - 16, 112);
-    this.pauseButtonBounds.setTo(STAGE.W - 106, 108, 96, 30);
     this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
     if (this.backgroundShader) {
       this.backgroundShader.setPosition(STAGE.W / 2, STAGE.H / 2).setDisplaySize(STAGE.W, STAGE.H);
@@ -1093,8 +1093,9 @@ class Play extends TrackScene {
     return false;
   }
 
-  handlePointerDown(pointer) {
-    if (this.pauseButtonBounds.contains(pointer.x, pointer.y)) {
+  handlePointerDown(pointer, over) {
+    // `over` is the reusable hit-test list; only inspect it synchronously.
+    if (over && over.includes(this.pauseButton)) {
       this.pauseGame();
       return true;
     }
