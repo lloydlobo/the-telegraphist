@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Agent / tooling artifacts
+.opencode/
+.aider*
+.antigravitycli/
+
+# Local junk
+node_modules/
+*.bak
+*.log
+perf.data
+errorlog.txt
+
+# Local screenshots (docs/screenshots is tracked)
+/screenshots/

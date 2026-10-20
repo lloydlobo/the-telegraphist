@@ -1,0 +1,20 @@
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+    background: #050705;
+    overflow: hidden;
+}
+
+canvas {
+    display: block;
+    image-rendering: pixelated;
+    box-shadow: 0 0 60px rgba(125, 255, 155, 0.12);
+}
