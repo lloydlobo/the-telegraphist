@@ -33,7 +33,8 @@ Collected on the [LD60 entry](https://ldjam.com/) during judging. Verbatim, newe
 
 ## Post-jam changes
 
-Tracked on the `postjam` branch.
+The submitted build is tagged `ldjam-60-submission`; everything below is on
+`main`.
 
 1. **Wide desktop stage** — fixed height, aspect-driven width (up to 1280×720),
    1.5× note geometry, gate centred, scroll speed derived from track length.
