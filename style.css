@@ -11,10 +11,17 @@ body {
     height: 100%;
     background: #050705;
     overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 canvas {
     display: block;
-    image-rendering: pixelated;
+    max-width: 100%;
+    max-height: 100%;
+    touch-action: none;
     box-shadow: 0 0 60px rgba(125, 255, 155, 0.12);
 }

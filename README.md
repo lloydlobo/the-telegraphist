@@ -7,8 +7,9 @@ Signals scroll toward the key line. Tap on the beat for a **dit**, hold for a
 degrades every time you miss. No Morse knowledge required — the game teaches
 letters as you send them.
 
-Made in 48 hours for **Ludum Dare 60**. Play the jam build:
-<!-- TODO: paste the ldjam.com entry URL here -->
+Made in 48 hours for **Ludum Dare 60** (*The Traffic Jam*). The submitted
+build is preserved in this repo under the `ldjam-60-submission` tag.
+<!-- TODO: link the ldjam.com entry here when handy -->
 
 ![Menu](docs/screenshots/menu.png)
 
@@ -31,23 +32,28 @@ phones it uses the original 480×720 portrait layout.
 | Dit | Tap `Space` / `Enter` / `J` / `F` | Quick tap |
 | Dah | Hold `Space` / `Enter` / `J` / `F` | Press and hold |
 | Pause | `Esc` or `P` | `[ PAUSE ]` |
-| Mute | `M` | — |
+| Mute | `M` | `SOUND` in the pause menu |
 | Start / retry | `Space` | Buttons |
 
 A dit is a press under 250 ms; a dah is a press of at least 120 ms. Both must
-start within ±250 ms of the signal reaching the line.
+start within ±250 ms of the signal reaching the line. Every signal is graded —
+`PERFECT` inside 90 ms, `GOOD` inside 170 ms — and misses say why
+(`TOO LONG`, `TOO SHORT`, `TOO EARLY`, `MISSED`).
 
 ## Screens
 
-| Tutorial | Gameplay | Miss |
+| Tutorial | Guided practice | Gameplay |
 | --- | --- | --- |
-| ![Tutorial](docs/screenshots/tutorial.png) | ![Gameplay](docs/screenshots/gameplay.png) | ![Miss](docs/screenshots/gameplay-miss.png) |
+| ![Tutorial](docs/screenshots/tutorial.png) | ![Practice](docs/screenshots/practice.png) | ![Gameplay](docs/screenshots/gameplay.png) |
+
+Screenshots show the post-jam build at 1920×1080. The `ldjam-60-submission` tag
+is the original 480×720 portrait jam build.
 
 ## How it works
 
-- `game.js` — the whole game: five Phaser scenes (`Menu`, `Tutorial`, `Play`,
-  `Pause`, `Over`), a WebAudio synth for dits/dahs/pads, and a GLSL CRT shader
-  for the screen background.
+- `game.js` — the whole game: six Phaser scenes (`Menu`, `Tutorial`, `Practice`,
+  `Play`, `Pause`, `Over`), a WebAudio synth for dits/dahs/pads, and a GLSL CRT
+  shader for the screen background.
 - `style.css` — full-bleed canvas, no scrollbars.
 - `vendor/phaser.min.js` — Phaser 4.2.1, vendored so the game runs offline.
 
@@ -57,10 +63,10 @@ so hit accuracy isn't inflated by a frame of latency.
 ## Post-jam work
 
 The jam build is tagged `ldjam-60-submission` and kept as-is. Changes since
-then live on `postjam` and are summarised in [docs/feedback.md](docs/feedback.md):
-desktop scaling and larger notes, an interactive tutorial with per-note
-feedback, a visible beat grid, gentler opening tempo, persisted progress, and a
-handful of input/audio fixes.
+then are summarised in [docs/feedback.md](docs/feedback.md): desktop scaling and
+larger notes, an interactive tutorial with per-note feedback, a visible beat
+grid, gentler opening tempo, persisted progress, and a handful of input/audio
+fixes.
 
 ## Credits
 
