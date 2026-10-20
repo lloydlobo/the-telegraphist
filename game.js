@@ -1241,13 +1241,6 @@ window.addEventListener("resize", () => {
   }, 180);
 });
 
-// Pause when the tab loses focus so a run cannot die in the background.
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) return;
-  const playScene = game.scene.getScene("Play");
-  if (playScene && playScene.scene.isActive()) playScene.pauseGame();
-});
-
 // --- ENTRY POINT ---
 
 const game = new Phaser.Game({
@@ -1257,4 +1250,11 @@ const game = new Phaser.Game({
   backgroundColor: COLOR.BG,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [Menu, Tutorial, Practice, Play, Pause, Over],
+});
+
+// Pause when the tab loses focus so a run cannot die in the background.
+// Phaser translates visibilitychange (and pagehide) into this event.
+game.events.on(Phaser.Core.Events.HIDDEN, () => {
+  const playScene = game.scene.getScene("Play");
+  if (playScene && playScene.scene.isActive()) playScene.pauseGame();
 });
