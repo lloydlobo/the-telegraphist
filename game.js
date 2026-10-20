@@ -33,6 +33,24 @@ const DOT_MAX_SECONDS = 0.25;
 const DASH_FORCE_RESOLVE_SECONDS = 1.0;
 const TIMING_LINE_X = 120;
 const HIDE_MASTERED_LABELS = false;
+const WORD_HISTORY_LIMIT = 5;
+const PLAY_BACKGROUND_SHADER = `
+precision mediump float;
+uniform vec2 resolution;
+uniform float time;
+void main() {
+  vec2 uv = gl_FragCoord.xy / resolution.xy;
+  vec2 pixel = gl_FragCoord.xy;
+  float scan = 0.5 + 0.5 * cos(pixel.y * 0.72);
+  float grain = fract(sin(dot(floor(pixel / 3.0 + time * 5.0), vec2(12.9898, 78.233))) * 43758.5453);
+  float roll = 1.0 - smoothstep(0.0, 0.18, abs(uv.y - fract(time * 0.08)));
+  float vignette = 1.0 - smoothstep(0.28, 0.82, length((uv - 0.5) * vec2(1.0, 0.8)));
+  vec3 base = vec3(0.035, 0.032, 0.018);
+  vec3 phosphor = vec3(0.15, 0.19, 0.075) * (0.25 + scan * 0.45 + roll * 0.3);
+  vec3 color = (base + phosphor + grain * 0.018) * (0.45 + vignette * 0.75);
+  gl_FragColor = vec4(color, 1.0);
+}
+`;
 
 /**
  * @typedef {{
@@ -282,34 +300,57 @@ class Menu extends Phaser.Scene {
     this.add.text(W / 2, H / 8 + 44 * 2, "- .... .", { fontFamily: "monospace", fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
     this.add.text(W / 2, H / 8 + 44 * 2.5, "- . .-.. . --. .-. .- .--. .... .. ... -", { fontFamily: "monospace", fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
 
-    const DEBUG_SHOW_WORDS = true;
-    const DEBUG_SHOW_MORSE_CODE = true;
-
-    let py = Math.floor(H / 8 + 44 * 3.5);
-
-    if (DEBUG_SHOW_MORSE_CODE) {
-      if (!DEBUG_SHOW_WORDS) py = Math.floor(H / 2 - 44 * 1);
-      const codes = Object.entries(MORSE_CODE);
-      for (let i = 0; i < codes.length; i++) {
-        this.add.text(W / 2 - 18, py + 12 * i, `${codes[i][0]} ${codes[i][1]}`, { ...FONT, fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.0); // NOTE: left align, adjust x with - offset
-      }
-      py = py + 12 * codes.length;
-    }
-
-    if (DEBUG_SHOW_WORDS) {
-      py = Math.floor(H / 2 + 44 * 1.5);
-      for (let i = 0; i < WORDS.length; i++) {
-        this.add.text(W / 2, py + 10 * i, WORDS[i], { ...FONT, fontSize: "12px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
-      }
-      py = py + 12 * WORDS.length;
-    }
-
-    this.add.text(W / 2, H - 44 * 1, "TAP OR SPACE TO CLOCK IN", { fontFamily: "monospace", fontSize: "18px", color: COLOR.FG, fontStyle: "bold" }).setOrigin(0.5);
+    this.add.text(W / 2, H / 2 - 34, "DIT  .  TAP / QUICK PRESS", {
+      ...FONT, fontSize: "16px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+    this.add.text(W / 2, H / 2 + 4, "DAH  -  PRESS AND HOLD", {
+      ...FONT, fontSize: "16px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+    this.add.text(W / 2, H / 2 + 54, "TIME EACH SIGNAL TO THE LINE", {
+      ...FONT, fontSize: "13px", color: COLOR.FG,
+    }).setOrigin(0.5);
 
     const go = () => { SFX.start(this); this.scene.start("Play"); };
-    makeActionButton(this, W / 2, H - 90, "CLOCK IN", go);
+    makeActionButton(this, W / 2, H - 132, "CLOCK IN", go);
+    makeActionButton(this, W / 2, H - 76, "HOW TO PLAY", () => this.scene.start("Tutorial"));
     this.input.keyboard.once("keydown-SPACE", go);
-    this.input.once("pointerdown", go);
+  }
+}
+
+// --- SCENE: Tutorial ---
+
+class Tutorial extends Phaser.Scene {
+  constructor() { super("Tutorial"); }
+
+  create() {
+    this.cameras.main.setBackgroundColor(COLOR.BG);
+    this.add.text(W / 2, 100, "HOW TO SEND MORSE", {
+      ...FONT, fontSize: "24px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 190, "WATCH THE SIGNAL MOVE TOWARD THE LINE", {
+      ...FONT, fontSize: "14px", color: COLOR.FG, align: "center",
+    }).setOrigin(0.5);
+    this.add.text(W / 2, 250, "PRESS AS IT REACHES THE LINE", {
+      ...FONT, fontSize: "14px", color: COLOR.FG, align: "center",
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 340, "DIT   .   TAP OR PRESS BRIEFLY", {
+      ...FONT, fontSize: "17px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+    this.add.text(W / 2, 395, "DAH   -   PRESS AND HOLD", {
+      ...FONT, fontSize: "17px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 475, "Example: A = .-   (DIT, then DAH)", {
+      ...FONT, fontSize: "15px", color: COLOR.FG, align: "center",
+    }).setOrigin(0.5);
+
+    makeActionButton(this, W / 2, 570, "START SENDING", () => {
+      SFX.start(this);
+      this.scene.start("Play");
+    });
+    makeActionButton(this, W / 2, 626, "BACK", () => this.scene.start("Menu"));
   }
 }
 
@@ -326,6 +367,30 @@ class Play extends Phaser.Scene {
 
     this.graphics = this.add.graphics();
     this.statusText = this.add.text(10, 10, "", { ...FONT, color: COLOR.FG });
+    this.wordHistory = [];
+    this.wordHistoryText = this.add.text(W - 10, 10, "", {
+      ...FONT,
+      fontSize: "12px",
+      color: COLOR.FG,
+      align: "right",
+      lineSpacing: 3,
+    }).setOrigin(1, 0).setDepth(2);
+    this.pauseButton = this.add.text(W - 10, 96, "[ PAUSE ]", {
+      ...FONT,
+      fontSize: "12px",
+      color: COLOR.FG,
+      backgroundColor: "#1a120d",
+      padding: { x: 7, y: 5 },
+    }).setOrigin(1, 0).setDepth(2);
+    this.pauseButtonBounds = new Phaser.Geom.Rectangle(W - 100, 92, 90, 30);
+    this.glowGraphics = this.add.graphics().setDepth(-1);
+    this.backgroundShader = null;
+
+    if (this.game.renderer.type === Phaser.WEBGL) {
+      const shaderKey = "dit-dah-play-background";
+      this.cache.shader.add(shaderKey, new Phaser.Display.BaseShader(shaderKey, PLAY_BACKGROUND_SHADER));
+      this.backgroundShader = this.add.shader(shaderKey, W / 2, H / 2, W, H).setDepth(-2);
+    }
 
     this.elapsedSeconds = 0;
     this.previousTimestamp = performance.now() / 1e3;
@@ -340,10 +405,20 @@ class Play extends Phaser.Scene {
     this.currentPressTime = 0;
 
     this.input.keyboard.on("keydown", (event) => {
+      if (event.code === "Escape" || event.code === "KeyP") {
+        this.pauseGame();
+        return;
+      }
       if (!event.repeat) this.handlePress(this.gameTimeFromEvent(event.timeStamp));
     });
     this.input.keyboard.on("keyup", (event) => this.handleRelease(this.gameTimeFromEvent(event.timeStamp)));
-    this.input.on("pointerdown", (pointer) => this.handlePress(this.gameTimeFromEvent(pointer.event.timeStamp)));
+    this.input.on("pointerdown", (pointer) => {
+      if (this.pauseButtonBounds.contains(pointer.x, pointer.y)) {
+        this.pauseGame();
+        return;
+      }
+      this.handlePress(this.gameTimeFromEvent(pointer.event.timeStamp));
+    });
     this.input.on("pointerup", (pointer) => this.handleRelease(this.gameTimeFromEvent(pointer.event.timeStamp)));
 
     this.scheduleWord();
@@ -395,6 +470,16 @@ class Play extends Phaser.Scene {
       const gateY = 210;
       const gateHeight = 90;
       this.graphics.clear().fillStyle(0xffffff).fillRect(TIMING_LINE_X, gateY, 2, gateHeight);
+      const upcomingNote = this.notes[this.noteIndex];
+      const proximity = upcomingNote
+        ? 1 - Phaser.Math.Clamp(Math.abs(upcomingNote.on - this.elapsedSeconds) / HIT_WINDOW_SECONDS, 0, 1)
+        : 0;
+      this.glowGraphics.clear();
+      if (upcomingNote) {
+        this.glowGraphics
+          .fillStyle(0xffbb44, 0.04 + proximity * 0.14)
+          .fillRect(TIMING_LINE_X - 12, gateY - 6, 26, gateHeight + 12);
+      }
       for (const note of this.notes) {
         const noteX = Math.round(TIMING_LINE_X + (note.on - this.elapsedSeconds) * 120);
         const isVisible = noteX > -40 && noteX < 520;
@@ -407,6 +492,7 @@ class Play extends Phaser.Scene {
         else this.graphics.fillCircle(noteX, gateY + 23, 8);
       }
       this.statusText.setText(`score ${this.score}    quality ${this.quality | 0}    letters ${LETTER_ORDER.slice(0, this.unlockedLetterCount)}`)
+      if (this.backgroundShader) this.backgroundShader.setUniform("time", this.elapsedSeconds);
     }
   }
 
@@ -428,6 +514,12 @@ class Play extends Phaser.Scene {
       });
       nextNoteTime += BEAT_SECONDS;
     }
+    const word = this.notes.map((note) => note.letter)
+      .filter((letter, index, letters) => index === 0 || letter !== letters[index - 1])
+      .join("");
+    this.wordHistory.push(word);
+    this.wordHistory = this.wordHistory.slice(-WORD_HISTORY_LIMIT);
+    this.wordHistoryText.setText(this.wordHistory.join("\n"));
   }
 
   handlePress(eventTime) {
@@ -464,6 +556,11 @@ class Play extends Phaser.Scene {
     this.currentPressTime = 0;
   }
 
+  pauseGame() {
+    this.scene.launch("Pause");
+    this.scene.pause();
+  }
+
   /**
    * @param {MorseSignalNote} note 
    * @param {boolean} hit 
@@ -478,6 +575,7 @@ class Play extends Phaser.Scene {
     } else {
       this.quality -= 10;
       SFX.miss(this);
+      this.cameras.main.shake(100, 0.004);
     }
     note.done = hit ? 1 : 2;
     this.noteIndex++;
@@ -486,6 +584,39 @@ class Play extends Phaser.Scene {
   // NOTE: Native timestamps avoid adding the frame delay from Phaser's input queue.
   gameTimeFromEvent(timestamp) {
     return (timestamp > 1e12 ? performance.now() : timestamp) / 1e3 - this.previousTimestamp;
+  }
+}
+
+// --- SCENE: Pause ---
+
+class Pause extends Phaser.Scene {
+  constructor() { super("Pause"); }
+
+  create() {
+    this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.78);
+    this.add.text(W / 2, 220, "LINE PAUSED", {
+      ...FONT, fontSize: "28px", color: COLOR.FG, fontStyle: "bold",
+    }).setOrigin(0.5);
+
+    const resume = () => {
+      const playScene = this.scene.get("Play");
+      playScene.previousTimestamp = performance.now() / 1e3 - playScene.elapsedSeconds;
+      this.scene.stop();
+      this.scene.resume("Play");
+    };
+    makeActionButton(this, W / 2, 320, "RESUME", resume);
+    makeActionButton(this, W / 2, 380, "MAIN MENU", () => {
+      this.scene.stop("Play");
+      this.scene.start("Menu");
+    });
+
+    this.input.keyboard.on("keydown", (event) => {
+      if (event.code === "Escape" || event.code === "KeyP") resume();
+      if (event.code === "KeyM") {
+        this.scene.stop("Play");
+        this.scene.start("Menu");
+      }
+    });
   }
 }
 
@@ -538,6 +669,6 @@ new Phaser.Game(
     height: H,
     backgroundColor: COLOR.BG,
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-    scene: [Menu, Play, Over],
+    scene: [Menu, Tutorial, Play, Pause, Over],
   }
 );
