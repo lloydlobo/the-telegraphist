@@ -156,13 +156,13 @@ const isMastered = (letter) => {
 
 // --- SFX ---
 
-const ctxOf = (scene) => (audio ? audio : scene.sound && scene.sound.context ? scene.sound.context : null);
-const outOf = (ctx) => (audio && ctx === audio && masterGain ? masterGain : ctx.destination);
+const ctxOf = (scene) => (scene && scene.sound && scene.sound.context) || null;
 
 function tone(scene, freq, dur, waveType, gain, slide, delay) {
   if (saveData.mute) return;
   const ctx = ctxOf(scene);
-  if (!ctx) return;
+  const out = ctx && scene.sound.destination;
+  if (!ctx || !out) return;
 
   const t0 = ctx.currentTime + (delay || 0);
   const oscillator = ctx.createOscillator();
@@ -176,7 +176,7 @@ function tone(scene, freq, dur, waveType, gain, slide, delay) {
   envelope.gain.linearRampToValueAtTime(gain === null ? 0.15 : gain, t0 + 0.008);
   envelope.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-  oscillator.connect(envelope).connect(outOf(ctx));
+  oscillator.connect(envelope).connect(out);
   oscillator.start(t0);
   oscillator.stop(t0 + dur + 0.03);
 }
@@ -206,7 +206,7 @@ function noise(scene, dur, gain, freq, q) {
   output.gain.setValueAtTime(gain, ctx.currentTime);
   output.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
 
-  source.connect(filter).connect(output).connect(outOf(ctx));
+  source.connect(filter).connect(output).connect(out);
   source.start();
   source.stop(ctx.currentTime + dur);
 }
@@ -233,50 +233,54 @@ const SFX = {
 
 // --- AMBIENCE ---
 
-let audio = null;
+/**
+ * Shared compressor for the ambience bus (pad + melody only — SFX bypass it,
+ * exactly as in the pre-refactor graph). Lazily attached to Phaser's sound
+ * manager so mute and unlock are handled in one place.
+ */
 let master = null;
-let masterGain = null;
-let ambienceTimer = null;
+let masterContext = null;
+
+function ensureMaster(scene) {
+  const ctx = ctxOf(scene);
+  const out = scene && scene.sound && scene.sound.destination;
+  if (!ctx || !out) return null;
+
+  if (!master || masterContext !== ctx) {
+    master = ctx.createDynamicsCompressor();
+    master.threshold.value = -18;
+    master.knee.value = 12;
+    master.ratio.value = 8;
+    master.attack.value = 0.003;
+    master.release.value = 0.25;
+    master.connect(out);
+    masterContext = ctx;
+  }
+
+  return master;
+}
 
 const scale = [0, 3, 5, 7, 10, 12];
 
-function setupAudio() {
-  audio = new AudioContext();
-
-  master = audio.createDynamicsCompressor();
-  master.threshold.value = -18;
-  master.knee.value = 12;
-  master.ratio.value = 8;
-  master.attack.value = 0.003;
-  master.release.value = 0.25;
-
-  masterGain = audio.createGain();
-  masterGain.gain.value = saveData.mute ? 0 : 1;
-
-  master.connect(masterGain).connect(audio.destination);
-}
-
 function applyMute() {
-  if (masterGain) masterGain.gain.value = saveData.mute ? 0 : 1;
-  if (saveData.mute) stopAmbience();
+  if (game && game.sound) game.sound.mute = saveData.mute;
 }
 
 function toggleMute() {
   saveData.mute = !saveData.mute;
   applyMute();
   persistSave();
-  if (!saveData.mute && audio) {
-    const playScene = game.scene.getScene("Play");
-    if (playScene && playScene.scene.isActive()) startAmbience();
-  }
   return saveData.mute;
 }
 
-function playNote(note) {
-  if (!audio || saveData.mute) return;
-  const now = audio.currentTime;
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
+function playNote(scene, note) {
+  if (saveData.mute) return;
+  const ctx = ctxOf(scene);
+  const out = ensureMaster(scene);
+  if (!ctx || !out) return;
+  const now = ctx.currentTime;
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
 
   oscillator.type = "triangle";
   oscillator.frequency.value = 220 * 2 ** (note / 12);
@@ -286,7 +290,7 @@ function playNote(note) {
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
 
   oscillator.connect(gain);
-  gain.connect(master);
+  gain.connect(out);
 
   oscillator.start(now);
   oscillator.stop(now + 0.35);
@@ -296,14 +300,17 @@ function playNote(note) {
 // Melody: 0.08 = 8% amplitude; each pad: 1–1.75%.
 const PAD_VOICES = [[-8, 0.0125], [0, 0.0175], [7, 0.01]];
 
-function playPad(note) {
-  if (!audio || saveData.mute) return;
-  const now = audio.currentTime;
+function playPad(scene, note) {
+  if (saveData.mute) return;
+  const ctx = ctxOf(scene);
+  const out = ensureMaster(scene);
+  if (!ctx || !out) return;
+  const now = ctx.currentTime;
 
   for (const [detune, volume] of PAD_VOICES) {
-    const oscillator = audio.createOscillator();
-    const filter = audio.createBiquadFilter();
-    const gain = audio.createGain();
+    const oscillator = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
 
     oscillator.type = "sawtooth";
     oscillator.frequency.value = 110 * 2 ** (note / 12);
@@ -319,44 +326,18 @@ function playPad(note) {
 
     oscillator.connect(filter);
     filter.connect(gain);
-    gain.connect(master);
+    gain.connect(out);
 
     oscillator.start(now);
     oscillator.stop(now + 7);
   }
 }
 
-function playAmbientNote() {
+function playAmbientNote(scene) {
   const note = scale[Math.floor(Math.random() * scale.length)];
-  playNote(note);
-  playPad(note);
+  playNote(scene, note);
+  playPad(scene, note);
 }
-
-function startAmbience() {
-  if (!audio || ambienceTimer || saveData.mute) return;
-  playAmbientNote();
-  ambienceTimer = window.setInterval(playAmbientNote, 600);
-}
-
-function stopAmbience() {
-  if (!ambienceTimer) return;
-  window.clearInterval(ambienceTimer);
-  ambienceTimer = null;
-}
-
-/** Audio needs a user gesture; init on the first pointer or key press. */
-function ensureAudio() {
-  if (audio) return;
-  try {
-    setupAudio();
-    audio.resume();
-  } catch {
-    audio = null;
-  }
-}
-
-window.addEventListener("pointerdown", ensureAudio, { capture: true });
-window.addEventListener("keydown", ensureAudio, { capture: true });
 
 // --- HELPERS ---
 
@@ -745,6 +726,9 @@ class Menu extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
+    // Sync the persisted mute preference into Phaser's sound manager.
+    applyMute();
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.15 : 1;
 
@@ -967,9 +951,22 @@ class Play extends TrackScene {
       .setDepth(2);
 
     this.scheduleWord();
-    startAmbience();
 
-    this.events.once("shutdown", () => stopAmbience());
+    // Ambience rides the Scene Clock: it freezes while the scene is paused and
+    // dies with the scene, so no start/stop plumbing is needed. It no-ops
+    // while muted.
+    playAmbientNote(this);
+    this.time.addEvent({ delay: 600, loop: true, callback: () => playAmbientNote(this) });
+
+    // Rebase the send-timing reference when the scene resumes (from the Pause
+    // menu or a Return to play after tab hide). Phaser does not clear custom
+    // scene-event listeners on shutdown, so remove it explicitly.
+    const onResume = () => {
+      this.previousTimestamp = performance.now() / 1e3 - this.elapsedSeconds;
+      playAmbientNote(this);
+    };
+    this.events.on(Phaser.Scenes.Events.RESUME, onResume);
+    this.events.once("shutdown", () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
   }
 
   update() {
@@ -1106,7 +1103,6 @@ class Play extends TrackScene {
 
   pauseGame() {
     if (!this.scene.isActive() || this.scene.isPaused()) return;
-    stopAmbience();
     this.scene.launch("Pause");
     this.scene.pause();
   }
@@ -1124,11 +1120,8 @@ class Pause extends Phaser.Scene {
     this.add.text(STAGE.W / 2, STAGE.H * 0.26, "LINE PAUSED", font(28, true)).setOrigin(0.5);
 
     const resume = () => {
-      const playScene = this.scene.get("Play");
-      playScene.previousTimestamp = performance.now() / 1e3 - playScene.elapsedSeconds;
       this.scene.stop();
       this.scene.resume("Play");
-      startAmbience();
     };
 
     const soundButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.5, this.soundLabel(), () => {
