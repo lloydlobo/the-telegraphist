@@ -14,6 +14,188 @@ const COLOR = {
   BAD: "#d97a63",
 };
 
+// --- OFFICE ART ---
+
+/**
+ * A telegraph office painted as chunky pixel art, in the spirit of vintage
+ * hand-tinted operator illustrations: pane window, operator seen from behind
+ * (headphones, cable), brass sounder box, strap key and telegram forms on the
+ * desk. Drawn once into a canvas texture at boot — no image assets, and the
+ * OFFICE markers below let an offline harness render the same painting for
+ * visual checks.
+ */
+
+const OFFICE_W = 160;
+const OFFICE_H = 240;
+const OFFICE_SCALE = 3; // 160x240 painted units -> 480x720 stage pixels
+
+// Telegram-form ink, shared with the SENDING ticker in Play.
+const INK = "#26221d";
+
+const OFFICE_SCENE = {
+  wall: "#4a4038",
+  wallDark: "#3a322b",
+  sky: "#b6b8be",
+  skyLight: "#caccd2",
+  frame: "#6f6d4c",
+  frameDark: "#51503a",
+  desk: "#9c8a5a",
+  deskLight: "#b5a26c",
+  deskDark: "#77693f",
+  wood: "#8a5a2a",
+  woodDark: "#5f3f1c",
+  woodLight: "#a8743a",
+  brass: "#c9a44a",
+  brassDark: "#8a6a24",
+  paper: "#e6dfc5",
+  paperShade: "#d3cbab",
+  suit: "#4d3d33",
+  suitShade: "#3b2e27",
+  hair: "#7a4a1f",
+  hairShade: "#5c3616",
+  skin: "#c99f72",
+  phones: "#1c1a18",
+  metal: "#5a5a5a",
+  chair: "#241b14",
+  ink: "#2a2622",
+};
+
+function paintOffice(ctx, lit = true) {
+  const A = OFFICE_SCENE;
+  const px = (x, y, w, h, c) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const dot = (cx, cy, r, c) => {
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // --- room ---
+  px(0, 0, OFFICE_W, OFFICE_H, A.wall);
+
+  // --- window (4x5 panes) ---
+  px(14, 8, 132, 112, A.frame);
+  px(17, 11, 126, 106, A.frameDark);
+  for (let gy = 0; gy < 5; gy++) {
+    for (let gx = 0; gx < 4; gx++) {
+      const tone = (gx * 5 + gy * 3) % 7 < 2 ? A.skyLight : A.sky;
+      px(19 + gx * 31, 13 + gy * 21, 29, 19, tone);
+    }
+  }
+  px(12, 120, 136, 5, A.frame); // sill
+
+  // --- wall strip between sill and desk ---
+  px(0, 125, OFFICE_W, 25, A.wall);
+  px(0, 142, OFFICE_W, 4, A.wallDark); // baseboard
+
+  // --- desk ---
+  px(0, 150, OFFICE_W, 90, A.desk);
+  px(0, 150, OFFICE_W, 5, A.deskLight);
+  px(0, 200, OFFICE_W, 40, A.deskDark);
+
+  // --- sounder box, right of the operator ---
+  px(96, 116, 44, 30, A.wood);
+  px(96, 116, 44, 5, A.woodLight);
+  px(134, 116, 6, 30, A.woodDark);
+  px(100, 128, 13, 11, A.ink); // label plate
+  dot(126, 132, 4, A.brass); // dial knob
+  dot(126, 132, 2, A.brassDark);
+
+  // wire from the sounder across the desk to the key terminal
+  px(140, 140, 13, 1, A.ink);
+  px(152, 140, 1, 17, A.ink);
+  px(92, 156, 61, 1, A.ink);
+  px(92, 156, 1, 5, A.ink);
+
+  // --- strap key (brass base, knob left, pivot right) ---
+  px(60, 160, 32, 7, A.brassDark);
+  px(87, 155, 3, 4, A.brass); // contact terminal under the wire
+  dot(80, 159, 3, A.ink); // pivot
+  dot(65, 157, 4, A.ink); // knob
+
+  // --- papers on the desk ---
+  px(102, 172, 46, 30, A.paper); // telegram form
+  px(102, 198, 46, 4, A.paperShade);
+  px(134, 174, 12, 6, A.brassDark); // stamp
+  const dashes = [30, 34, 26, 34, 18];
+  for (let i = 0; i < dashes.length; i++) px(106, 177 + i * 4, dashes[i], 1, A.ink);
+  px(34, 168, 28, 16, A.paper); // spare sheet
+  px(38, 172, 20, 1, A.ink);
+  px(38, 176, 22, 1, A.ink);
+  px(38, 180, 14, 1, A.ink);
+  px(8, 156, 22, 9, A.paperShade); // pencil slip
+
+  // --- operator, seen from behind ---
+  // torso
+  px(22, 92, 30, 6, A.suit); // shoulder cap
+  px(10, 104, 54, 46, A.suit);
+  px(14, 96, 46, 10, A.suit);
+  px(10, 104, 5, 46, A.suitShade);
+  // reaching arm (stepped, down-right toward the key)
+  px(54, 106, 14, 12, A.suitShade);
+  px(62, 118, 13, 10, A.suit);
+  px(66, 132, 12, 10, A.suit);
+  px(64, 142, 10, 8, A.suitShade);
+  px(60, 150, 10, 8, A.skin); // hand over the knob
+  // head
+  px(31, 59, 18, 3, A.hair); // crown
+  px(28, 62, 24, 26, A.hair);
+  px(28, 62, 5, 26, A.hairShade);
+  px(34, 88, 12, 6, A.skin); // neck
+  px(30, 94, 20, 6, A.paper); // collar
+  // headset
+  px(31, 55, 18, 5, A.phones); // band
+  px(47, 70, 8, 12, A.phones); // earcup
+  px(48, 72, 3, 8, A.metal);
+  // cable hanging from the earcup
+  px(51, 82, 1, 12, A.phones);
+  px(48, 94, 1, 14, A.phones);
+  px(46, 108, 1, 12, A.phones);
+  px(48, 120, 1, 12, A.phones);
+  px(52, 132, 1, 12, A.phones);
+  px(56, 144, 1, 10, A.phones);
+
+  // --- chair back in the foreground (short posts, sturdier rails) ---
+  px(6, 148, 10, 92, A.chair);
+  px(50, 148, 10, 92, A.chair);
+  px(6, 172, 54, 9, A.chair);
+  px(6, 200, 54, 9, A.chair);
+  px(6, 226, 54, 14, A.chair);
+
+  // --- night wash for the LINE DEAD variant ---
+  if (!lit) {
+    ctx.fillStyle = "rgba(8, 6, 12, 0.66)";
+    ctx.fillRect(0, 0, OFFICE_W, OFFICE_H);
+  }
+}
+
+function ensureOfficeTexture(scene, lit) {
+  const key = lit ? "office-lit" : "office-dark";
+  if (scene.textures.exists(key)) return key;
+  const texture = scene.textures.createCanvas(key, OFFICE_W, OFFICE_H);
+  paintOffice(texture.getContext(), lit);
+  texture.refresh();
+  texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  return key;
+}
+
+/**
+ * Backdrop: the office painting as a centred "postcard" over the dark stage,
+ * dimmed so scene text stays readable. Returns nothing; the dim overlay is a
+ * scene rectangle that never intercepts input.
+ */
+function addOfficeBackdrop(scene, dim, lit = true) {
+  scene.add
+    .image(STAGE.W / 2, STAGE.H / 2, ensureOfficeTexture(scene, lit))
+    .setScale(OFFICE_SCALE);
+  scene.add.rectangle(STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H, 0x0c0805, dim);
+}
+
+// --- END OFFICE ART ---
+
 const MORSE_CODE = { E: ".", T: "-", I: "..", M: "--", A: ".-", N: "-.", S: "...", O: "---", H: "....", R: ".-.", D: "-..", L: ".-.." };
 const LETTER_ORDER = "ETIMANSOHRDL";
 
@@ -230,6 +412,11 @@ const SFX = {
     tone(scene, 320, 0.9, "sawtooth", 0.13, -260);
     tone(scene, 210, 1.0, "square", 0.05, -160, 0.1);
   },
+  // Telegraph-sounder thunk layered under CLEAN hit feedback.
+  clack: (scene) => {
+    noise(scene, 0.05, 0.1, 420, 1.4);
+    tone(scene, 170, 0.06, "square", 0.06, -30);
+  },
 };
 
 // --- AMBIENCE ---
@@ -402,6 +589,10 @@ class TrackScene extends Phaser.Scene {
   createTrack() {
     this.graphics = this.add.graphics();
     this.glowGraphics = this.add.graphics().setDepth(-1);
+    this.keyGfx = this.add.graphics().setDepth(3);
+    this.sendDown = false;
+    this.sendT = 0;
+    this.lastDeltaSeconds = 0.016;
     this.feedbackText = this.add
       .text(0, 0, "", font(18, true))
       .setOrigin(0.5)
@@ -474,11 +665,13 @@ class TrackScene extends Phaser.Scene {
     }
     if (this.handleSpecialKey(event)) return;
     if (event.repeat || !SEND_KEYS.has(event.code)) return;
+    this.sendDown = true;
     this.handlePress(this.gameTimeFromEvent(event.timeStamp));
   }
 
   onKeyUp(event) {
     if (!SEND_KEYS.has(event.code)) return;
+    this.sendDown = false;
     this.handleRelease(this.gameTimeFromEvent(event.timeStamp));
   }
 
@@ -489,6 +682,7 @@ class TrackScene extends Phaser.Scene {
   onPointerDown(pointer, over) {
     if (this.handlePointerDown(pointer, over)) return;
     // Native pointer timestamps avoid the frame delay from Phaser's input queue.
+    this.sendDown = true;
     this.handlePress(this.gameTimeFromEvent(pointer.downTime || performance.now()));
   }
 
@@ -498,6 +692,7 @@ class TrackScene extends Phaser.Scene {
 
   onPointerUp(pointer) {
     // See the note above; upTime can be 0 for a pointer that was never down.
+    this.sendDown = false;
     this.handleRelease(this.gameTimeFromEvent(pointer.upTime || performance.now()));
   }
 
@@ -565,6 +760,7 @@ class TrackScene extends Phaser.Scene {
     this.noteIndex++;
 
     if (hit) {
+      SFX.clack(this);
       const grade = offset === null ? "SENT" : gradeOffset(offset);
       this.showFeedback(grade, grade === "PERFECT" ? COLOR.GOOD : COLOR.FG);
     } else {
@@ -582,6 +778,7 @@ class TrackScene extends Phaser.Scene {
     this.elapsedSeconds = Math.min(now - this.previousTimestamp, this.elapsedSeconds + 0.1);
     this.previousTimestamp = now - this.elapsedSeconds;
     const deltaSeconds = this.elapsedSeconds - previousElapsed;
+    this.lastDeltaSeconds = deltaSeconds;
 
     while (
       this.notes[this.noteIndex] &&
@@ -675,6 +872,70 @@ class TrackScene extends Phaser.Scene {
         this.graphics.fillCircle(x, midY, metrics.noteR);
       }
     }
+
+    this.drawKeyHardware(metrics);
+  }
+
+  /**
+   * Sounder box + strap key drawn left of the strike line. The lever tilts
+   * toward the contact whenever the send key is physically down, so even a
+   * missed press moves the hardware.
+   */
+  drawKeyHardware(metrics) {
+    const g = this.keyGfx;
+    if (!g) return;
+    g.clear();
+
+    const dt = Math.min(0.1, this.lastDeltaSeconds);
+    this.sendT += ((this.sendDown ? 1 : 0) - this.sendT) * Math.min(1, dt * 14);
+
+    const { lineX, midY, gateY, gateH, wide } = metrics;
+    // On the wide stage the group hangs left of the strike line; on the
+    // 480-wide portrait stage the left strip is only ~120px, so it anchors
+    // to the left margin below the gate instead.
+    const sx = wide ? lineX - 126 : 20; // sounder box left edge
+    const hingeX = wide ? lineX - 68 : 96;
+    const plinthW = wide ? 112 : 104;
+    const shelfY = wide ? midY + Math.round(gateH * 0.52) : gateY + gateH + 92;
+    const hingeY = shelfY - 6;
+
+    // Plinth shadow, so the hardware reads as one desk-top group.
+    g.fillStyle(0x000000, 0.24);
+    g.fillRect(sx - 8, shelfY - 26, plinthW + 16, 54);
+
+    // Sounder: wooden case, lit top lip, dark label, brass dial.
+    g.fillStyle(0x8a5a2a, 1);
+    g.fillRect(sx, shelfY - 18, 34, 22);
+    g.fillStyle(0xa8743a, 1);
+    g.fillRect(sx, shelfY - 18, 34, 4);
+    g.fillStyle(0x5f3f1c, 1);
+    g.fillRect(sx + 28, shelfY - 18, 6, 22);
+    g.fillStyle(0x2a2622, 1);
+    g.fillRect(sx + 5, shelfY - 9, 10, 8);
+    g.fillStyle(0xc9a44a, 1);
+    g.fillCircle(sx + 23, shelfY - 7, 3.5);
+
+    // Wire across the desk from the sounder to the key hinge.
+    const wireY = shelfY - 8;
+    g.fillStyle(0x2a2622, 1);
+    g.fillRect(sx + 34, wireY, hingeX - (sx + 34), 1);
+
+    // Strap key: brass base, contact nub, lever pivoting on the hinge.
+    g.fillStyle(0x8a6a24, 1);
+    g.fillRect(hingeX - 14, shelfY - 6, 28, 6);
+    g.fillStyle(0xc9a44a, 1);
+    g.fillRect(hingeX + 8, shelfY - 12, 5, 3);
+
+    const angle = -1.05 + this.sendT * 0.6; // idle up -> pressed down onto the contact
+    const leverLength = 16;
+    const endX = hingeX + Math.cos(angle) * leverLength;
+    const endY = hingeY + Math.sin(angle) * leverLength;
+    g.fillStyle(0x2a2622, 1);
+    for (let step = 0; step <= 6; step++) {
+      const t = step / 6;
+      g.fillRect(Math.round(hingeX + (endX - hingeX) * t) - 1, Math.round(hingeY + (endY - hingeY) * t) - 1, 3, 3);
+    }
+    g.fillCircle(endX, endY, 3);
   }
 
   /**
@@ -732,6 +993,8 @@ class Menu extends Phaser.Scene {
     // Sync the persisted mute preference into Phaser's sound manager.
     applyMute();
 
+    addOfficeBackdrop(this, 0.5);
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.15 : 1;
 
@@ -771,6 +1034,8 @@ class Tutorial extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
+    addOfficeBackdrop(this, 0.6);
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.1 : 1;
 
@@ -808,6 +1073,9 @@ class Practice extends TrackScene {
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
+
+    // Heavier dim: practice keeps amber notes readable over the scene.
+    addOfficeBackdrop(this, 0.76);
 
     this.stepIndex = 0;
     this.steps = ["E", "T", "A"];
@@ -950,8 +1218,9 @@ class Play extends TrackScene {
     this.telegramText = this.add
       .text(STAGE.W / 2, STAGE.H * 0.78, "", font(16, true))
       .setOrigin(0.5)
-      .setColor(COLOR.DIM)
+      .setColor(INK)
       .setDepth(2);
+    this.formGfx = this.add.graphics().setDepth(1);
 
     this.scheduleWord();
 
@@ -993,8 +1262,37 @@ class Play extends TrackScene {
     this.wordHistoryText.setPosition(STAGE.W - 16, 14);
     this.pauseButton.setPosition(STAGE.W - 16, 112);
     this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
+    this.drawTelegramForm();
     if (this.backgroundShader) {
       this.backgroundShader.setPosition(STAGE.W / 2, STAGE.H / 2).setDisplaySize(STAGE.W, STAGE.H);
+    }
+  }
+
+  /**
+   * The SENDING ticker rides on a paper telegram form: a lit tape strip with
+   * perforated top and bottom edges, sized to the current word.
+   */
+  drawTelegramForm() {
+    this.formGfx.clear();
+    const text = this.telegramText;
+    if (!text.text) return;
+
+    const w = Math.max(140, text.width + 40);
+    const h = 30;
+    const cx = STAGE.W / 2;
+    const cy = STAGE.H * 0.78;
+    const g = this.formGfx;
+
+    g.fillStyle(0xe6dfc5, 1);
+    g.fillRect(cx - w / 2, cy - h / 2, w, h);
+    g.fillStyle(0xcfc7a4, 1);
+    g.fillRect(cx - w / 2, cy + h / 2 - 3, w, 3);
+
+    // Perforation bites along both edges.
+    g.fillStyle(0x0c0805, 1);
+    for (let x = cx - w / 2 + 6; x < cx + w / 2 - 4; x += 10) {
+      g.fillRect(x, cy - h / 2 - 1, 4, 3);
+      g.fillRect(x, cy + h / 2 - 2, 4, 3);
     }
   }
 
@@ -1037,6 +1335,7 @@ class Play extends TrackScene {
     this.wordHistory = this.wordHistory.slice(-WORD_HISTORY_LIMIT);
     this.wordHistoryText.setText(this.wordHistory.join("\n"));
     this.telegramText.setText(`SENDING  ${word}`);
+    this.drawTelegramForm();
 
     this.telegramCount++;
     this.beatSeconds = Math.max(BEAT_MIN_SECONDS, this.beatSeconds - BEAT_STEP_SECONDS);
@@ -1177,6 +1476,9 @@ class Over extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
+
+    // Lamp-out variant: the office goes dark when the line dies.
+    addOfficeBackdrop(this, 0.58, false);
 
     if (this.finalScore > saveData.best) {
       saveData.best = this.finalScore;
