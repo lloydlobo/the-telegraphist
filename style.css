@@ -9,7 +9,8 @@
 html,
 body {
     height: 100%;
-    background: #050705;
+    /* Warm wall tone behind the letterboxed portrait stage, fading to black. */
+    background: radial-gradient(130% 120% at 50% 32%, #241b14 0%, #120c08 55%, #050705 100%);
     overflow: hidden;
     overscroll-behavior: none;
     touch-action: none;

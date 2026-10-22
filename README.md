@@ -23,7 +23,9 @@ python3 -m http.server 8000
 No build step, no dependencies to install. Everything runs from static files.
 
 On desktop, the stage widens with the window (up to 1280×720 logical); on
-phones it uses the original 480×720 portrait layout.
+phones it uses the original 480×720 portrait layout. Short, wide viewports
+(landscape phones) shrink the logical stage so the game never scales below
+0.7×, and note geometry scales up to compensate.
 
 ## Controls
 
@@ -32,8 +34,12 @@ phones it uses the original 480×720 portrait layout.
 | Dit | Tap `Space` / `Enter` / `J` / `F` | Quick tap |
 | Dah | Hold `Space` / `Enter` / `J` / `F` | Press and hold |
 | Pause | `Esc` or `P` | `[ PAUSE ]` |
+| Morse chart | `H` | Button in the pause menu |
 | Mute | `M` | `SOUND` in the pause menu |
 | Start / retry | `Space` | Buttons |
+
+Opening the Morse chart pauses the run's clock; closing it returns exactly
+where you were (play resumes, or the pause menu is rebuilt).
 
 A dit is a press under 250 ms; a dah is a press of at least 120 ms. Both must
 start within ±250 ms of the signal reaching the line. Every signal is graded —
@@ -51,10 +57,11 @@ is the original 480×720 portrait jam build.
 
 ## How it works
 
-- `game.js` — the whole game: six Phaser scenes (`Menu`, `Tutorial`, `Practice`,
-  `Play`, `Pause`, `Over`), a WebAudio synth for dits/dahs/pads, a GLSL CRT
-  shader for the screen background, and the telegraph-office artwork painted
-  into a canvas texture at boot (no image assets).
+- `game.js` — the whole game: seven Phaser scenes (`Menu`, `Tutorial`,
+  `Practice`, `Play`, `Pause`, `Over`, `Chart`), a WebAudio synth for
+  dits/dahs/pads, a GLSL CRT shader for the screen background, and the
+  telegraph-office artwork painted into a canvas texture at boot (no image
+  assets; the room is repainted to the full stage width on resize).
 - `style.css` — full-bleed canvas, no scrollbars.
 - `vendor/phaser.min.js` — Phaser 4.2.1, vendored so the game runs offline.
 
@@ -67,8 +74,10 @@ The jam build is tagged `ldjam-60-submission` and kept as-is. Changes since
 then are summarised in [docs/feedback.md](docs/feedback.md): desktop scaling and
 larger notes, an interactive tutorial with per-note feedback, a visible beat
 grid, gentler opening tempo, persisted progress, a handful of input/audio
-fixes, and the retro telegraph-office dressing (menu backdrops plus sounder
-and telegram-form flavour in play).
+fixes, the retro telegraph-office dressing (menu backdrops plus sounder and
+telegram-form flavour in play), office walls that extend to the full stage
+width, a Morse chart overlay (`H` or the pause menu) that pauses the run, and
+legibility/touch-target fixes for landscape phones.
 
 ## Credits
 

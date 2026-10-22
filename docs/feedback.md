@@ -47,3 +47,12 @@ The submitted build is tagged `ldjam-60-submission`; everything below is on
    opening tempo, persisted letter stats.
 3. **Correctness** — audio on keyboard start, filtered send keys, fixed
    `MEET`→`MET` history bug, ambience gated to Play, faster quality recovery.
+4. **Full-width dressing** — the office painting covers the whole stage on wide
+   screens (extended walls/desk instead of a centred 480-wide postcard), and
+   the page behind the letterboxed portrait stage picks up the same warm wall
+   tone.
+5. **Morse chart** — `H` or the pause menu opens "Operator's Morse Chart" on a
+   telegram-form panel; the run's clock is paused while it is open.
+6. **Legibility on landscape phones** — short wide screens keep a 0.7× minimum
+   physical scale (the logical stage shrinks), note geometry scales up, and
+   the pause control became a real button with generous touch targets.

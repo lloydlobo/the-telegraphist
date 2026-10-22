@@ -60,8 +60,9 @@ const OFFICE_SCENE = {
   ink: "#2a2622",
 };
 
-function paintOffice(ctx, lit = true) {
+function paintOffice(ctx, lit = true, roomW = OFFICE_W) {
   const A = OFFICE_SCENE;
+  const padX = Math.round(Math.max(0, roomW - OFFICE_W) / 2);
   const px = (x, y, w, h, c) => {
     ctx.fillStyle = c;
     ctx.fillRect(x, y, w, h);
@@ -73,8 +74,18 @@ function paintOffice(ctx, lit = true) {
     ctx.fill();
   };
 
-  // --- room ---
-  px(0, 0, OFFICE_W, OFFICE_H, A.wall);
+  // --- room: walls, baseboard and desk run the full room width so extended
+  // walls (wide stages) read as the same continuous office ---
+  px(0, 0, roomW, OFFICE_H, A.wall);
+  px(0, 142, roomW, 4, A.wallDark); // baseboard
+  px(0, 150, roomW, 90, A.desk);
+  px(0, 150, roomW, 5, A.deskLight);
+  px(0, 200, roomW, 40, A.deskDark);
+
+  // --- centre dressing: window, furniture, operator and chair stay in the
+  // original 160-wide composition, shifted into the extended room ---
+  ctx.save();
+  ctx.translate(padX, 0);
 
   // --- window (4x5 panes) ---
   px(14, 8, 132, 112, A.frame);
@@ -86,15 +97,6 @@ function paintOffice(ctx, lit = true) {
     }
   }
   px(12, 120, 136, 5, A.frame); // sill
-
-  // --- wall strip between sill and desk ---
-  px(0, 125, OFFICE_W, 25, A.wall);
-  px(0, 142, OFFICE_W, 4, A.wallDark); // baseboard
-
-  // --- desk ---
-  px(0, 150, OFFICE_W, 90, A.desk);
-  px(0, 150, OFFICE_W, 5, A.deskLight);
-  px(0, 200, OFFICE_W, 40, A.deskDark);
 
   // --- sounder box, right of the operator ---
   px(96, 116, 44, 30, A.wood);
@@ -168,15 +170,19 @@ function paintOffice(ctx, lit = true) {
   // --- night wash for the LINE DEAD variant ---
   if (!lit) {
     ctx.fillStyle = "rgba(8, 6, 12, 0.66)";
-    ctx.fillRect(0, 0, OFFICE_W, OFFICE_H);
+    ctx.fillRect(0, 0, roomW, OFFICE_H);
   }
 }
 
 function ensureOfficeTexture(scene, lit) {
-  const key = lit ? "office-lit" : "office-dark";
+  // The room is painted to the current stage width (in 160x240 painting
+  // units per third of the stage), so wide stages get extended walls
+  // instead of a floating 480-wide postcard.
+  const roomW = Math.round(STAGE.W / OFFICE_SCALE);
+  const key = `office-${lit ? "lit" : "dark"}-${roomW}`;
   if (scene.textures.exists(key)) return key;
-  const texture = scene.textures.createCanvas(key, OFFICE_W, OFFICE_H);
-  paintOffice(texture.getContext(), lit);
+  const texture = scene.textures.createCanvas(key, roomW, OFFICE_H);
+  paintOffice(texture.getContext(), lit, roomW);
   texture.refresh();
   texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
   return key;
@@ -228,6 +234,7 @@ const BEAT_START_SECONDS = 0.65;
 const BEAT_MIN_SECONDS = 0.5;
 const BEAT_STEP_SECONDS = 0.03;
 const HIT_WINDOW_SECONDS = 0.25;
+const WIDE_SCALE_FLOOR = 0.7; // min logical->physical scale for short wide screens
 const DASH_MIN_SECONDS = 0.12;
 const DOT_MAX_SECONDS = 0.25;
 const DASH_FORCE_RESOLVE_SECONDS = 1.0;
@@ -261,7 +268,9 @@ void main() {
 
 /**
  * Width follows the window aspect on desktop; portrait stays at the original
- * 480x720. Height is always the design height, so pixel sizes are stable.
+ * 480x720. Height is normally the design height, so pixel sizes are stable —
+ * but short, wide viewports (landscape phones) shrink the logical stage
+ * instead of letting FIT scale it down to unreadably small notes.
  */
 function computeStage() {
   const width = window.innerWidth || MIN_STAGE_WIDTH;
@@ -272,10 +281,14 @@ function computeStage() {
     return { W: MIN_STAGE_WIDTH, H: DESIGN_HEIGHT, wide: false };
   }
 
-  const stageWidth = Math.round(DESIGN_HEIGHT * aspect);
+  const stageHeight = height < DESIGN_HEIGHT
+    ? Math.max(360, Math.round(height / WIDE_SCALE_FLOOR))
+    : DESIGN_HEIGHT;
+  const cappedAspect = Math.min(aspect, MAX_STAGE_WIDTH / DESIGN_HEIGHT);
+  const stageWidth = Math.round(stageHeight * cappedAspect);
   return {
     W: Math.min(MAX_STAGE_WIDTH, Math.max(720, stageWidth)),
-    H: DESIGN_HEIGHT,
+    H: stageHeight,
     wide: true,
   };
 }
@@ -461,6 +474,24 @@ function toggleMute() {
   return saveData.mute;
 }
 
+/**
+ * Open the Morse chart over the running scene, pausing it while the chart is
+ * up. Opening from the Pause menu replaces the pause menu; closing there
+ * rebuilds the pause menu. Returns control fairly: nothing ticks under the
+ * chart (Track scenes pause their Scene Clock).
+ */
+function openMorseChart(scene) {
+  const key = scene.scene.key;
+  if (key === "Pause") {
+    scene.scene.launch("Chart", { source: "Pause" });
+    scene.scene.stop();
+    return;
+  }
+  if (scene.scene.isActive("Chart")) return;
+  scene.scene.launch("Chart", { source: key });
+  scene.scene.pause();
+}
+
 function playNote(scene, note) {
   if (saveData.mute) return;
   const ctx = ctxOf(scene);
@@ -630,6 +661,9 @@ class TrackScene extends Phaser.Scene {
     const wide = STAGE.W > 600;
     const lineX = Math.round(STAGE.W * (wide ? 0.3 : 0.25));
     const gateH = wide ? 190 : 150;
+    // Short stages render at a low physical scale; bump the track geometry so
+    // notes stay legible on landscape phones.
+    const bump = STAGE.H < 620 ? 1.4 : 1;
 
     return {
       wide,
@@ -638,10 +672,10 @@ class TrackScene extends Phaser.Scene {
       gateY: Math.round(STAGE.H * 0.38),
       gateH,
       midY: Math.round(STAGE.H * 0.38) + Math.round(gateH / 2),
-      noteR: wide ? 13 : 10,
-      dashW: wide ? 68 : 52,
-      dashH: wide ? 24 : 18,
-      labelSize: wide ? 20 : 15,
+      noteR: (wide ? 13 : 10) * bump,
+      dashW: (wide ? 68 : 52) * bump,
+      dashH: (wide ? 24 : 18) * bump,
+      labelSize: (wide ? 20 : 15) * bump,
       labelY: Math.round(STAGE.H * 0.38) + gateH + 26,
     };
   }
@@ -661,6 +695,11 @@ class TrackScene extends Phaser.Scene {
     if (event.code === "KeyM" && !event.repeat) {
       const muted = toggleMute();
       this.showFeedback(muted ? "MUTED" : "SOUND ON", COLOR.DIM);
+      return;
+    }
+    if (event.code === "KeyH" && !event.repeat) {
+      SFX.good(this);
+      openMorseChart(this);
       return;
     }
     if (this.handleSpecialKey(event)) return;
@@ -1018,6 +1057,9 @@ class Menu extends Phaser.Scene {
     makeActionButton(this, centerX, STAGE.H * 0.8, "CLOCK IN", go);
     makeActionButton(this, centerX, STAGE.H * 0.89, "HOW TO PLAY", () => this.scene.start("Tutorial"));
 
+    if (STAGE.H >= 620) {
+      this.add.text(centerX, STAGE.H - 40, "Press H during play for the morse chart", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
+    }
     this.add.text(centerX, STAGE.H - 22, "SPACE OR TAP TO CLOCK IN", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
     this.input.keyboard.on("keydown-SPACE", go);
     this.input.keyboard.on("keydown-ENTER", go);
@@ -1048,7 +1090,8 @@ class Tutorial extends Phaser.Scene {
     this.add.text(centerX, STAGE.H * 0.52, "DAH   -   PRESS AND HOLD", font(17 * scale, true)).setOrigin(0.5);
 
     this.add.text(centerX, STAGE.H * 0.62, "Example: A = .-   (DIT, then DAH)", font(15 * scale)).setOrigin(0.5);
-    this.add.text(centerX, STAGE.H * 0.68, "Every clean word unlocks more letters.", font(13 * scale)).setOrigin(0.5).setColor(COLOR.DIM);
+    this.add.text(centerX, STAGE.H * 0.67, "Every clean word unlocks more letters.", font(13 * scale)).setOrigin(0.5).setColor(COLOR.DIM);
+    this.add.text(centerX, STAGE.H * 0.72, "Press H during play for the morse chart.", font(13 * scale)).setOrigin(0.5).setColor(COLOR.DIM);
 
     makeActionButton(this, centerX, STAGE.H * 0.78, "PRACTICE FIRST", () => {
       SFX.start(this);
@@ -1209,11 +1252,16 @@ class Play extends TrackScene {
       .setOrigin(1, 0)
       .setDepth(2);
 
-    this.pauseButton = this.add
-      .text(STAGE.W - 16, 112, "[ PAUSE ]", { ...font(13), backgroundColor: "#1a120d", padding: { x: 7, y: 5 } })
-      .setOrigin(1, 0)
-      .setDepth(2)
-      .setInteractive({ useHandCursor: true });
+    const pauseWidth = 150;
+    this.pauseButton = makeActionButton(
+      this,
+      STAGE.W - 16 - pauseWidth / 2,
+      128,
+      "[ PAUSE ]",
+      () => this.pauseGame(),
+      pauseWidth
+    );
+    this.pauseHitWidth = pauseWidth;
 
     this.telegramText = this.add
       .text(STAGE.W / 2, STAGE.H * 0.78, "", font(16, true))
@@ -1260,7 +1308,7 @@ class Play extends TrackScene {
   relayout() {
     this.statusText.setPosition(16, 14);
     this.wordHistoryText.setPosition(STAGE.W - 16, 14);
-    this.pauseButton.setPosition(STAGE.W - 16, 112);
+    this.pauseButton.setPosition(STAGE.W - 16 - this.pauseHitWidth / 2, 128);
     this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
     this.drawTelegramForm();
     if (this.backgroundShader) {
@@ -1419,34 +1467,36 @@ class Pause extends Phaser.Scene {
 
   create() {
     this.add.rectangle(STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H, 0x000000, 0.78);
-    this.add.text(STAGE.W / 2, STAGE.H * 0.26, "LINE PAUSED", font(28, true)).setOrigin(0.5);
+    this.add.text(STAGE.W / 2, STAGE.H * 0.22, "LINE PAUSED", font(28, true)).setOrigin(0.5);
 
     const resume = () => {
       this.scene.stop();
       this.scene.resume("Play");
     };
 
-    const soundButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.5, this.soundLabel(), () => {
+    const soundButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.44, this.soundLabel(), () => {
       toggleMute();
       soundButton.labelText.setText(this.soundLabel());
     });
 
-    const tickButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.58, this.tickLabel(), () => {
+    const tickButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.64, this.tickLabel(), () => {
       saveData.tick = !saveData.tick;
       persistSave();
       tickButton.labelText.setText(this.tickLabel());
     });
 
-    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.42, "RESUME", resume);
-    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.66, "MAIN MENU", () => {
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.34, "RESUME", resume);
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.54, "MORSE CHART", () => openMorseChart(this), 180);
+    makeActionButton(this, STAGE.W / 2, STAGE.H * 0.74, "MAIN MENU", () => {
       this.scene.stop("Play");
       this.scene.start("Menu");
-    });
+    }, 180);
 
-    this.add.text(STAGE.W / 2, STAGE.H * 0.85, "ESC / P  RESUME     M  MUTE", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
+    this.add.text(STAGE.W / 2, STAGE.H * 0.88, "ESC/P  RESUME     H  CHART     M  MUTE", font(12)).setOrigin(0.5).setColor(COLOR.DIM);
 
     this.input.keyboard.on("keydown", (event) => {
       if (event.code === "Escape" || event.code === "KeyP") resume();
+      if (event.code === "KeyH" && !event.repeat) openMorseChart(this);
       if (event.code === "KeyM" && !event.repeat) {
         toggleMute();
         soundButton.labelText.setText(this.soundLabel());
@@ -1512,12 +1562,122 @@ class Over extends Phaser.Scene {
   }
 }
 
+// --- SCENE: Chart ---
+
+/**
+ * The Morse reference: every taught letter with its dit/dah pattern on a
+ * telegram-form panel. Launched over a paused Play/Practice run (or from the
+ * pause menu), so an open chart stops the run's clock — closing it returns
+ * control to wherever it was opened from. Static enough that the resize
+ * handler's plain restart re-lays it out.
+ */
+class Chart extends Phaser.Scene {
+  constructor() {
+    super("Chart");
+  }
+
+  init(data) {
+    this.source = (data && data.source) || "Play";
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor(COLOR.BG);
+    addOfficeBackdrop(this, 0.82);
+
+    const letters = LETTER_ORDER.split("");
+    const isWide = STAGE.W > 600;
+    const cols = isWide ? 5 : 2;
+    const rows = Math.ceil(letters.length / cols);
+    const cellW = isWide ? 128 : 196;
+    const cellH = isWide ? 88 : 66;
+    const headH = 64;
+    const footH = 80;
+    const panelW = cellW * cols + 24;
+    const panelH = headH + rows * cellH + footH;
+
+    const cx = STAGE.W / 2;
+    const top = Math.max(14, (STAGE.H - panelH) / 2);
+    const left = cx - panelW / 2;
+    const gridTop = top + headH;
+
+    // Telegram-form panel: paper face, shading strips, brass stamp.
+    const g = this.add.graphics().setDepth(1);
+    g.fillStyle(0x1a120d, 1);
+    g.fillRoundedRect(left - 6, top - 6, panelW + 12, panelH + 12, 10);
+    g.fillStyle(0xe6dfc5, 1);
+    g.fillRect(left, top, panelW, panelH);
+    g.fillStyle(0xcfc7a4, 1);
+    g.fillRect(left, top + 3, panelW, 3);
+    g.fillRect(left, top + panelH - 6, panelW, 3);
+    g.fillStyle(0x8a6a24, 1);
+    g.fillRect(left + panelW - 92, top + 14, 68, 24);
+    g.fillStyle(0xe6dfc5, 1);
+    g.fillRect(left + panelW - 88, top + 18, 60, 16);
+
+    this.add
+      .text(cx, top + headH / 2 - 6, "OPERATOR'S MORSE CHART", font(20, true))
+      .setOrigin(0.5)
+      .setColor(INK)
+      .setDepth(2);
+    this.add
+      .text(cx, top + headH / 2 + 16, `${letters.length} letters taught - more unlock as you send clean words`, font(11))
+      .setOrigin(0.5)
+      .setColor("#6b6250")
+      .setDepth(2);
+
+    // Row rules across the paper for the classic form look.
+    for (let r = 1; r < rows; r++) {
+      const y = gridTop + r * cellH;
+      for (let x = left + 16; x < left + panelW - 16; x += 10) {
+        g.fillStyle(0xd3cbab, 1);
+        g.fillRect(x, y, 6, 1);
+      }
+    }
+
+    letters.forEach((letter, i) => {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const x = left + 12 + col * cellW + cellW / 2;
+      const y = gridTop + row * cellH;
+      this.add.text(x, y + 14, letter, font(24, true)).setOrigin(0.5).setColor(INK).setDepth(2);
+      this.add
+        .text(x, y + 42, MORSE_CODE[letter].split("").join(" "), font(15, true))
+        .setOrigin(0.5)
+        .setColor("#5c5342")
+        .setDepth(2);
+    });
+
+    makeActionButton(this, cx, top + panelH - footH / 2, "CLOSE", () => this.close(), 160).setDepth(3);
+    this.add
+      .text(cx, top + panelH - 16, "ESC / H  CLOSE", font(11))
+      .setOrigin(0.5)
+      .setColor("#6b6250")
+      .setDepth(2);
+
+    this.input.keyboard.on("keydown", (event) => {
+      if (event.code === "Escape" || event.code === "KeyH") this.close();
+    });
+  }
+
+  close() {
+    this.scene.stop();
+    if (this.source === "Pause") this.scene.start("Pause");
+    else this.scene.resume(this.source);
+  }
+}
+
 // --- RESIZE ---
 
 function applyStage(next) {
-  if (next.W === STAGE.W) return false;
+  if (next.W === STAGE.W && next.H === STAGE.H) return false;
   STAGE.W = next.W;
+  STAGE.H = next.H;
   STAGE.wide = next.wide;
+  // Office paintings are baked per stage size; drop the stale ones before
+  // the restarting scenes re-create them.
+  for (const key of game.textures.getTextureKeys()) {
+    if (key.startsWith("office-")) game.textures.remove(key);
+  }
   game.scale.resize(STAGE.W, STAGE.H);
   // FIT caches both the aspect ratio and the parent bounds from boot, so re-apply them.
   game.scale.displaySize.setAspectRatio(STAGE.W / STAGE.H);
@@ -1552,7 +1712,7 @@ const game = new Phaser.Game({
   height: STAGE.H,
   backgroundColor: COLOR.BG,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [Menu, Tutorial, Practice, Play, Pause, Over],
+  scene: [Menu, Tutorial, Practice, Play, Pause, Over, Chart],
 });
 
 // Pause when the tab loses focus so a run cannot die in the background.
