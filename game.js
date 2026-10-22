@@ -1204,8 +1204,10 @@ class Practice extends TrackScene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
-    // Heavier dim: practice keeps amber notes readable over the scene.
-    addOfficeBackdrop(this, 0.76);
+    // Heavier dim: practice keeps amber notes readable over the scene. On
+    // software renderers the full-screen painting + dim cost too much, and
+    // practice is timing-sensitive, so it gets the flat background instead.
+    if (!usingSoftwareRenderer()) addOfficeBackdrop(this, 0.76);
 
     this.stepIndex = 0;
     this.steps = ["E", "T", "A"];
