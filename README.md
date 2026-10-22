@@ -59,9 +59,11 @@ is the original 480×720 portrait jam build.
 
 - `game.js` — the whole game: seven Phaser scenes (`Menu`, `Tutorial`,
   `Practice`, `Play`, `Pause`, `Over`, `Chart`), a WebAudio synth for
-  dits/dahs/pads, a GLSL CRT shader for the screen background, and the
-  telegraph-office artwork painted into a canvas texture at boot (no image
-  assets; the room is repainted to the full stage width on resize).
+  dits/dahs/pads, a pre-baked CRT backdrop (scanlines, grain and vignette
+  painted once into a canvas texture — an earlier animated shader doubled
+  frame time on software/weak GPUs), and the telegraph-office artwork painted
+  into a canvas texture at boot (no image assets; the room is repainted to the
+  full stage width on resize).
 - `style.css` — full-bleed canvas, no scrollbars.
 - `vendor/phaser.min.js` — Phaser 4.2.1, vendored so the game runs offline.
 
@@ -76,8 +78,9 @@ larger notes, an interactive tutorial with per-note feedback, a visible beat
 grid, gentler opening tempo, persisted progress, a handful of input/audio
 fixes, the retro telegraph-office dressing (menu backdrops plus sounder and
 telegram-form flavour in play), office walls that extend to the full stage
-width, a Morse chart overlay (`H` or the pause menu) that pauses the run, and
-legibility/touch-target fixes for landscape phones.
+width, a Morse chart overlay (`H` or the pause menu) that pauses the run,
+legibility/touch-target fixes for landscape phones, and a performance pass
+that replaced the per-frame CRT shader with a baked backdrop.
 
 ## Credits
 

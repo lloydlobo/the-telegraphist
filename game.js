@@ -246,23 +246,97 @@ const RUNWAY_SECONDS = 3.2;
 const SEND_KEYS = new Set(["Space", "Enter", "KeyJ", "KeyF"]);
 const SAVE_KEY = "telegraphist.save.v1";
 
-const PLAY_BACKGROUND_SHADER = `
-precision mediump float;
-uniform vec2 resolution;
-uniform float time;
-void main() {
-  vec2 uv = gl_FragCoord.xy / resolution.xy;
-  vec2 pixel = gl_FragCoord.xy;
-  float scan = 0.5 + 0.5 * cos(pixel.y * 0.72);
-  float grain = fract(sin(dot(floor(pixel / 3.0 + time * 5.0), vec2(12.9898, 78.233))) * 43758.5453);
-  float roll = 1.0 - smoothstep(0.0, 0.18, abs(uv.y - fract(time * 0.08)));
-  float vignette = 1.0 - smoothstep(0.28, 0.82, length((uv - 0.5) * vec2(1.0, 0.8)));
-  vec3 base = vec3(0.035, 0.032, 0.018);
-  vec3 phosphor = vec3(0.15, 0.19, 0.075) * (0.25 + scan * 0.45 + roll * 0.3);
-  vec3 color = (base + phosphor + grain * 0.018) * (0.45 + vignette * 0.75);
-  gl_FragColor = vec4(color, 1.0);
+/**
+ * CRT backdrop, baked once into a canvas texture instead of run as a
+ * full-screen fragment shader every frame. The old shader cost a full-screen
+ * pass per frame (it doubled frame time on software/weak GPUs) for an effect
+ * whose only moving part was an almost-invisible grain and roll band. Baking
+ * scanlines, grain and vignette keeps the look and costs one textured quad.
+ */
+function paintCrt(ctx, w, h) {
+  // Dark base with a green phosphor bloom, like the old shader's palette.
+  ctx.fillStyle = "#0c0a05";
+  ctx.fillRect(0, 0, w, h);
+
+  const bloom = ctx.createRadialGradient(w / 2, h * 0.48, 0, w / 2, h * 0.48, Math.max(w, h) * 0.6);
+  bloom.addColorStop(0, "rgba(46,58,26,0.5)");
+  bloom.addColorStop(0.55, "rgba(38,48,22,0.22)");
+  bloom.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = bloom;
+  ctx.fillRect(0, 0, w, h);
+
+  // Scanlines: one dark row every other pixel, at the stage's own resolution
+  // (the same place the old shader sampled gl_FragCoord).
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  for (let y = 0; y < h; y += 2) ctx.fillRect(0, y, w, 1);
+
+  // Vignette.
+  const vignette = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.26, w / 2, h / 2, Math.max(w, h) * 0.62);
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
+
+  // Static grain, tiled from a tiny noise canvas (cheap, and just as convincing
+  // as the old per-frame noise).
+  const noise = document.createElement("canvas");
+  noise.width = 64;
+  noise.height = 64;
+  const noiseCtx = noise.getContext("2d");
+  const noiseImage = noiseCtx.createImageData(64, 64);
+  for (let i = 0; i < noiseImage.data.length; i += 4) {
+    const value = (Math.random() * 255) | 0;
+    noiseImage.data[i] = value;
+    noiseImage.data[i + 1] = value;
+    noiseImage.data[i + 2] = value;
+    noiseImage.data[i + 3] = 12;
+  }
+  noiseCtx.putImageData(noiseImage, 0, 0);
+  ctx.fillStyle = ctx.createPattern(noise, "repeat");
+  ctx.fillRect(0, 0, w, h);
 }
-`;
+
+function ensureCrtTexture(scene) {
+  if (usingSoftwareRenderer()) return null;
+  const key = `crt-${STAGE.W}x${STAGE.H}`;
+  if (!scene.textures.exists(key)) {
+    const texture = scene.textures.createCanvas(key, STAGE.W, STAGE.H);
+    paintCrt(texture.getContext(), STAGE.W, STAGE.H);
+    texture.refresh();
+  }
+  return key;
+}
+
+/** Add the baked CRT backdrop behind the play field. Returns the image. */
+function addCrtBackdrop(scene) {
+  const key = ensureCrtTexture(scene);
+  if (!key) return null;
+  return scene.add.image(STAGE.W / 2, STAGE.H / 2, key).setDepth(-2);
+}
+
+let softwareRenderer = null;
+
+/**
+ * Software WebGL (SwiftShader, llvmpipe) pays for every full-screen pixel on
+ * the CPU, where even one static backdrop texture can halve the frame rate.
+ * There we skip the CRT layer and keep the flat background so the game stays
+ * smooth; hardware GPUs get the full look. Memoised after the first check.
+ */
+function usingSoftwareRenderer() {
+  if (softwareRenderer !== null) return softwareRenderer;
+  softwareRenderer = false;
+  try {
+    const gl = game && game.renderer && game.renderer.gl;
+    if (gl) {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "";
+      softwareRenderer = /swiftshader|llvmpipe|softpipe|software render/i.test(String(name));
+    }
+  } catch {
+    softwareRenderer = false;
+  }
+  return softwareRenderer;
+}
 
 // --- STAGE ---
 
@@ -646,6 +720,15 @@ class TrackScene extends Phaser.Scene {
     this.sequenceDone = false;
 
     this.bindTrackInput();
+    // Rebase the send-timing reference whenever the scene resumes (from the
+    // Pause menu, the chart overlay, or a tab hide) so the clock does not leap
+    // forward by the time spent paused. Phaser does not clear custom
+    // scene-event listeners on shutdown, so remove it explicitly.
+    const onResume = () => {
+      this.previousTimestamp = performance.now() / 1e3 - this.elapsedSeconds;
+    };
+    this.events.on(Phaser.Scenes.Events.RESUME, onResume);
+    this.events.once("shutdown", () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
     this.events.once("shutdown", () => this.destroyTrack());
   }
 
@@ -1034,6 +1117,10 @@ class Menu extends Phaser.Scene {
 
     addOfficeBackdrop(this, 0.5);
 
+    // Bake the CRT backdrop while the menu paints, so entering Play never
+    // eats a texture-bake hitch.
+    ensureCrtTexture(this);
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.15 : 1;
 
@@ -1233,16 +1320,7 @@ class Play extends TrackScene {
     this.beatSeconds = BEAT_START_SECONDS;
     this.wordHistory = [];
 
-    this.backgroundShader = null;
-    if (this.game.renderer.type === Phaser.WEBGL) {
-      const shaderKey = "dit-dah-play-background";
-      if (!this.cache.shader.exists(shaderKey)) {
-        this.cache.shader.add(shaderKey, new Phaser.Display.BaseShader(shaderKey, PLAY_BACKGROUND_SHADER));
-      }
-      this.backgroundShader = this.add
-        .shader(shaderKey, STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H)
-        .setDepth(-2);
-    }
+    this.crtBackdrop = addCrtBackdrop(this);
 
     this.createTrack();
 
@@ -1277,14 +1355,8 @@ class Play extends TrackScene {
     // while muted.
     playAmbientNote(this);
     this.time.addEvent({ delay: 600, loop: true, callback: () => playAmbientNote(this) });
-
-    // Rebase the send-timing reference when the scene resumes (from the Pause
-    // menu or a Return to play after tab hide). Phaser does not clear custom
-    // scene-event listeners on shutdown, so remove it explicitly.
-    const onResume = () => {
-      this.previousTimestamp = performance.now() / 1e3 - this.elapsedSeconds;
-      playAmbientNote(this);
-    };
+    // TrackScene rebases the send clock on resume; just top up the ambience.
+    const onResume = () => playAmbientNote(this);
     this.events.on(Phaser.Scenes.Events.RESUME, onResume);
     this.events.once("shutdown", () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
   }
@@ -1301,8 +1373,6 @@ class Play extends TrackScene {
       SFX.over(this);
       this.scene.start("Over", { score: this.score });
     }
-
-    if (this.backgroundShader) this.backgroundShader.setUniform("time", this.elapsedSeconds);
   }
 
   relayout() {
@@ -1311,9 +1381,9 @@ class Play extends TrackScene {
     this.pauseButton.setPosition(STAGE.W - 16 - this.pauseHitWidth / 2, 128);
     this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
     this.drawTelegramForm();
-    if (this.backgroundShader) {
-      this.backgroundShader.setPosition(STAGE.W / 2, STAGE.H / 2).setDisplaySize(STAGE.W, STAGE.H);
-    }
+    // The backdrop is baked per stage size; rebuild it against the new size.
+    if (this.crtBackdrop) this.crtBackdrop.destroy();
+    this.crtBackdrop = addCrtBackdrop(this);
   }
 
   /**
@@ -1673,10 +1743,10 @@ function applyStage(next) {
   STAGE.W = next.W;
   STAGE.H = next.H;
   STAGE.wide = next.wide;
-  // Office paintings are baked per stage size; drop the stale ones before
-  // the restarting scenes re-create them.
+  // Office paintings and the CRT backdrop are baked per stage size; drop the
+  // stale ones before the restarting scenes re-create them.
   for (const key of game.textures.getTextureKeys()) {
-    if (key.startsWith("office-")) game.textures.remove(key);
+    if (key.startsWith("office-") || key.startsWith("crt-")) game.textures.remove(key);
   }
   game.scale.resize(STAGE.W, STAGE.H);
   // FIT caches both the aspect ratio and the parent bounds from boot, so re-apply them.

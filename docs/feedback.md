@@ -56,3 +56,9 @@ The submitted build is tagged `ldjam-60-submission`; everything below is on
 6. **Legibility on landscape phones** — short wide screens keep a 0.7× minimum
    physical scale (the logical stage shrinks), note geometry scales up, and
    the pause control became a real button with generous touch targets.
+7. **Smoothness** — the animated full-screen CRT fragment shader was replaced
+   with a baked scanline/grain/vignette texture (the shader doubled frame time
+   in software rendering) and skipped entirely when the browser falls back to
+   software WebGL, the canvas glow `box-shadow` was dropped, and the send clock
+   rebases on resume in Practice as well as Play so using the chart mid-run no
+   longer nudges the timing.
