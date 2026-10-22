@@ -14,6 +14,188 @@ const COLOR = {
   BAD: "#d97a63",
 };
 
+// --- OFFICE ART ---
+
+/**
+ * A telegraph office painted as chunky pixel art, in the spirit of vintage
+ * hand-tinted operator illustrations: pane window, operator seen from behind
+ * (headphones, cable), brass sounder box, strap key and telegram forms on the
+ * desk. Drawn once into a canvas texture at boot — no image assets, and the
+ * OFFICE markers below let an offline harness render the same painting for
+ * visual checks.
+ */
+
+const OFFICE_W = 160;
+const OFFICE_H = 240;
+const OFFICE_SCALE = 3; // 160x240 painted units -> 480x720 stage pixels
+
+// Telegram-form ink, shared with the SENDING ticker in Play.
+const INK = "#26221d";
+
+const OFFICE_SCENE = {
+  wall: "#4a4038",
+  wallDark: "#3a322b",
+  sky: "#b6b8be",
+  skyLight: "#caccd2",
+  frame: "#6f6d4c",
+  frameDark: "#51503a",
+  desk: "#9c8a5a",
+  deskLight: "#b5a26c",
+  deskDark: "#77693f",
+  wood: "#8a5a2a",
+  woodDark: "#5f3f1c",
+  woodLight: "#a8743a",
+  brass: "#c9a44a",
+  brassDark: "#8a6a24",
+  paper: "#e6dfc5",
+  paperShade: "#d3cbab",
+  suit: "#4d3d33",
+  suitShade: "#3b2e27",
+  hair: "#7a4a1f",
+  hairShade: "#5c3616",
+  skin: "#c99f72",
+  phones: "#1c1a18",
+  metal: "#5a5a5a",
+  chair: "#241b14",
+  ink: "#2a2622",
+};
+
+function paintOffice(ctx, lit = true) {
+  const A = OFFICE_SCENE;
+  const px = (x, y, w, h, c) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const dot = (cx, cy, r, c) => {
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // --- room ---
+  px(0, 0, OFFICE_W, OFFICE_H, A.wall);
+
+  // --- window (4x5 panes) ---
+  px(14, 8, 132, 112, A.frame);
+  px(17, 11, 126, 106, A.frameDark);
+  for (let gy = 0; gy < 5; gy++) {
+    for (let gx = 0; gx < 4; gx++) {
+      const tone = (gx * 5 + gy * 3) % 7 < 2 ? A.skyLight : A.sky;
+      px(19 + gx * 31, 13 + gy * 21, 29, 19, tone);
+    }
+  }
+  px(12, 120, 136, 5, A.frame); // sill
+
+  // --- wall strip between sill and desk ---
+  px(0, 125, OFFICE_W, 25, A.wall);
+  px(0, 142, OFFICE_W, 4, A.wallDark); // baseboard
+
+  // --- desk ---
+  px(0, 150, OFFICE_W, 90, A.desk);
+  px(0, 150, OFFICE_W, 5, A.deskLight);
+  px(0, 200, OFFICE_W, 40, A.deskDark);
+
+  // --- sounder box, right of the operator ---
+  px(96, 116, 44, 30, A.wood);
+  px(96, 116, 44, 5, A.woodLight);
+  px(134, 116, 6, 30, A.woodDark);
+  px(100, 128, 13, 11, A.ink); // label plate
+  dot(126, 132, 4, A.brass); // dial knob
+  dot(126, 132, 2, A.brassDark);
+
+  // wire from the sounder across the desk to the key terminal
+  px(140, 140, 13, 1, A.ink);
+  px(152, 140, 1, 17, A.ink);
+  px(92, 156, 61, 1, A.ink);
+  px(92, 156, 1, 5, A.ink);
+
+  // --- strap key (brass base, knob left, pivot right) ---
+  px(60, 160, 32, 7, A.brassDark);
+  px(87, 155, 3, 4, A.brass); // contact terminal under the wire
+  dot(80, 159, 3, A.ink); // pivot
+  dot(65, 157, 4, A.ink); // knob
+
+  // --- papers on the desk ---
+  px(102, 172, 46, 30, A.paper); // telegram form
+  px(102, 198, 46, 4, A.paperShade);
+  px(134, 174, 12, 6, A.brassDark); // stamp
+  const dashes = [30, 34, 26, 34, 18];
+  for (let i = 0; i < dashes.length; i++) px(106, 177 + i * 4, dashes[i], 1, A.ink);
+  px(34, 168, 28, 16, A.paper); // spare sheet
+  px(38, 172, 20, 1, A.ink);
+  px(38, 176, 22, 1, A.ink);
+  px(38, 180, 14, 1, A.ink);
+  px(8, 156, 22, 9, A.paperShade); // pencil slip
+
+  // --- operator, seen from behind ---
+  // torso
+  px(22, 92, 30, 6, A.suit); // shoulder cap
+  px(10, 104, 54, 46, A.suit);
+  px(14, 96, 46, 10, A.suit);
+  px(10, 104, 5, 46, A.suitShade);
+  // reaching arm (stepped, down-right toward the key)
+  px(54, 106, 14, 12, A.suitShade);
+  px(62, 118, 13, 10, A.suit);
+  px(66, 132, 12, 10, A.suit);
+  px(64, 142, 10, 8, A.suitShade);
+  px(60, 150, 10, 8, A.skin); // hand over the knob
+  // head
+  px(31, 59, 18, 3, A.hair); // crown
+  px(28, 62, 24, 26, A.hair);
+  px(28, 62, 5, 26, A.hairShade);
+  px(34, 88, 12, 6, A.skin); // neck
+  px(30, 94, 20, 6, A.paper); // collar
+  // headset
+  px(31, 55, 18, 5, A.phones); // band
+  px(47, 70, 8, 12, A.phones); // earcup
+  px(48, 72, 3, 8, A.metal);
+  // cable hanging from the earcup
+  px(51, 82, 1, 12, A.phones);
+  px(48, 94, 1, 14, A.phones);
+  px(46, 108, 1, 12, A.phones);
+  px(48, 120, 1, 12, A.phones);
+  px(52, 132, 1, 12, A.phones);
+  px(56, 144, 1, 10, A.phones);
+
+  // --- chair back in the foreground (short posts, sturdier rails) ---
+  px(6, 148, 10, 92, A.chair);
+  px(50, 148, 10, 92, A.chair);
+  px(6, 172, 54, 9, A.chair);
+  px(6, 200, 54, 9, A.chair);
+  px(6, 226, 54, 14, A.chair);
+
+  // --- night wash for the LINE DEAD variant ---
+  if (!lit) {
+    ctx.fillStyle = "rgba(8, 6, 12, 0.66)";
+    ctx.fillRect(0, 0, OFFICE_W, OFFICE_H);
+  }
+}
+
+function ensureOfficeTexture(scene, lit) {
+  const key = lit ? "office-lit" : "office-dark";
+  if (scene.textures.exists(key)) return key;
+  const texture = scene.textures.createCanvas(key, OFFICE_W, OFFICE_H);
+  paintOffice(texture.getContext(), lit);
+  texture.refresh();
+  texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  return key;
+}
+
+/**
+ * Backdrop: the office painting as a centred "postcard" over the dark stage,
+ * dimmed so scene text stays readable. Returns nothing; the dim overlay is a
+ * scene rectangle that never intercepts input.
+ */
+function addOfficeBackdrop(scene, dim, lit = true) {
+  scene.add
+    .image(STAGE.W / 2, STAGE.H / 2, ensureOfficeTexture(scene, lit))
+    .setScale(OFFICE_SCALE);
+  scene.add.rectangle(STAGE.W / 2, STAGE.H / 2, STAGE.W, STAGE.H, 0x0c0805, dim);
+}
+
+// --- END OFFICE ART ---
+
 const MORSE_CODE = { E: ".", T: "-", I: "..", M: "--", A: ".-", N: "-.", S: "...", O: "---", H: "....", R: ".-.", D: "-..", L: ".-.." };
 const LETTER_ORDER = "ETIMANSOHRDL";
 
@@ -156,13 +338,13 @@ const isMastered = (letter) => {
 
 // --- SFX ---
 
-const ctxOf = (scene) => (audio ? audio : scene.sound && scene.sound.context ? scene.sound.context : null);
-const outOf = (ctx) => (audio && ctx === audio && masterGain ? masterGain : ctx.destination);
+const ctxOf = (scene) => (scene && scene.sound && scene.sound.context) || null;
 
 function tone(scene, freq, dur, waveType, gain, slide, delay) {
   if (saveData.mute) return;
   const ctx = ctxOf(scene);
-  if (!ctx) return;
+  const out = ctx && scene.sound.destination;
+  if (!ctx || !out) return;
 
   const t0 = ctx.currentTime + (delay || 0);
   const oscillator = ctx.createOscillator();
@@ -176,7 +358,7 @@ function tone(scene, freq, dur, waveType, gain, slide, delay) {
   envelope.gain.linearRampToValueAtTime(gain === null ? 0.15 : gain, t0 + 0.008);
   envelope.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-  oscillator.connect(envelope).connect(outOf(ctx));
+  oscillator.connect(envelope).connect(out);
   oscillator.start(t0);
   oscillator.stop(t0 + dur + 0.03);
 }
@@ -184,7 +366,8 @@ function tone(scene, freq, dur, waveType, gain, slide, delay) {
 function noise(scene, dur, gain, freq, q) {
   if (saveData.mute) return;
   const ctx = ctxOf(scene);
-  if (!ctx) return;
+  const out = ctx && scene.sound.destination;
+  if (!ctx || !out) return;
 
   const length = Math.max(1, Math.floor(ctx.sampleRate * dur));
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
@@ -206,7 +389,7 @@ function noise(scene, dur, gain, freq, q) {
   output.gain.setValueAtTime(gain, ctx.currentTime);
   output.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
 
-  source.connect(filter).connect(output).connect(outOf(ctx));
+  source.connect(filter).connect(output).connect(out);
   source.start();
   source.stop(ctx.currentTime + dur);
 }
@@ -229,54 +412,63 @@ const SFX = {
     tone(scene, 320, 0.9, "sawtooth", 0.13, -260);
     tone(scene, 210, 1.0, "square", 0.05, -160, 0.1);
   },
+  // Telegraph-sounder thunk layered under CLEAN hit feedback.
+  clack: (scene) => {
+    noise(scene, 0.05, 0.1, 420, 1.4);
+    tone(scene, 170, 0.06, "square", 0.06, -30);
+  },
 };
 
 // --- AMBIENCE ---
 
-let audio = null;
+/**
+ * Shared compressor for the ambience bus (pad + melody only — SFX bypass it,
+ * exactly as in the pre-refactor graph). Lazily attached to Phaser's sound
+ * manager so mute and unlock are handled in one place.
+ */
 let master = null;
-let masterGain = null;
-let ambienceTimer = null;
+let masterContext = null;
+
+function ensureMaster(scene) {
+  const ctx = ctxOf(scene);
+  const out = scene && scene.sound && scene.sound.destination;
+  if (!ctx || !out) return null;
+
+  if (!master || masterContext !== ctx) {
+    master = ctx.createDynamicsCompressor();
+    master.threshold.value = -18;
+    master.knee.value = 12;
+    master.ratio.value = 8;
+    master.attack.value = 0.003;
+    master.release.value = 0.25;
+    master.connect(out);
+    masterContext = ctx;
+  }
+
+  return master;
+}
 
 const scale = [0, 3, 5, 7, 10, 12];
 
-function setupAudio() {
-  audio = new AudioContext();
-
-  master = audio.createDynamicsCompressor();
-  master.threshold.value = -18;
-  master.knee.value = 12;
-  master.ratio.value = 8;
-  master.attack.value = 0.003;
-  master.release.value = 0.25;
-
-  masterGain = audio.createGain();
-  masterGain.gain.value = saveData.mute ? 0 : 1;
-
-  master.connect(masterGain).connect(audio.destination);
-}
-
 function applyMute() {
-  if (masterGain) masterGain.gain.value = saveData.mute ? 0 : 1;
-  if (saveData.mute) stopAmbience();
+  if (game && game.sound) game.sound.mute = saveData.mute;
 }
 
 function toggleMute() {
   saveData.mute = !saveData.mute;
   applyMute();
   persistSave();
-  if (!saveData.mute && audio) {
-    const playScene = game.scene.getScene("Play");
-    if (playScene && playScene.scene.isActive()) startAmbience();
-  }
   return saveData.mute;
 }
 
-function playNote(note) {
-  if (!audio || saveData.mute) return;
-  const now = audio.currentTime;
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
+function playNote(scene, note) {
+  if (saveData.mute) return;
+  const ctx = ctxOf(scene);
+  const out = ensureMaster(scene);
+  if (!ctx || !out) return;
+  const now = ctx.currentTime;
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
 
   oscillator.type = "triangle";
   oscillator.frequency.value = 220 * 2 ** (note / 12);
@@ -286,7 +478,7 @@ function playNote(note) {
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
 
   oscillator.connect(gain);
-  gain.connect(master);
+  gain.connect(out);
 
   oscillator.start(now);
   oscillator.stop(now + 0.35);
@@ -296,14 +488,17 @@ function playNote(note) {
 // Melody: 0.08 = 8% amplitude; each pad: 1–1.75%.
 const PAD_VOICES = [[-8, 0.0125], [0, 0.0175], [7, 0.01]];
 
-function playPad(note) {
-  if (!audio || saveData.mute) return;
-  const now = audio.currentTime;
+function playPad(scene, note) {
+  if (saveData.mute) return;
+  const ctx = ctxOf(scene);
+  const out = ensureMaster(scene);
+  if (!ctx || !out) return;
+  const now = ctx.currentTime;
 
   for (const [detune, volume] of PAD_VOICES) {
-    const oscillator = audio.createOscillator();
-    const filter = audio.createBiquadFilter();
-    const gain = audio.createGain();
+    const oscillator = ctx.createOscillator();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
 
     oscillator.type = "sawtooth";
     oscillator.frequency.value = 110 * 2 ** (note / 12);
@@ -319,44 +514,18 @@ function playPad(note) {
 
     oscillator.connect(filter);
     filter.connect(gain);
-    gain.connect(master);
+    gain.connect(out);
 
     oscillator.start(now);
     oscillator.stop(now + 7);
   }
 }
 
-function playAmbientNote() {
+function playAmbientNote(scene) {
   const note = scale[Math.floor(Math.random() * scale.length)];
-  playNote(note);
-  playPad(note);
+  playNote(scene, note);
+  playPad(scene, note);
 }
-
-function startAmbience() {
-  if (!audio || ambienceTimer || saveData.mute) return;
-  playAmbientNote();
-  ambienceTimer = window.setInterval(playAmbientNote, 600);
-}
-
-function stopAmbience() {
-  if (!ambienceTimer) return;
-  window.clearInterval(ambienceTimer);
-  ambienceTimer = null;
-}
-
-/** Audio needs a user gesture; init on the first pointer or key press. */
-function ensureAudio() {
-  if (audio) return;
-  try {
-    setupAudio();
-    audio.resume();
-  } catch {
-    audio = null;
-  }
-}
-
-window.addEventListener("pointerdown", ensureAudio, { capture: true });
-window.addEventListener("keydown", ensureAudio, { capture: true });
 
 // --- HELPERS ---
 
@@ -420,6 +589,10 @@ class TrackScene extends Phaser.Scene {
   createTrack() {
     this.graphics = this.add.graphics();
     this.glowGraphics = this.add.graphics().setDepth(-1);
+    this.keyGfx = this.add.graphics().setDepth(3);
+    this.sendDown = false;
+    this.sendT = 0;
+    this.lastDeltaSeconds = 0.016;
     this.feedbackText = this.add
       .text(0, 0, "", font(18, true))
       .setOrigin(0.5)
@@ -474,6 +647,9 @@ class TrackScene extends Phaser.Scene {
   }
 
   bindTrackInput() {
+    // Captures are global (and are not removed on plugin shutdown by design);
+    // preventDefault is handled by the keyboard manager, not per event.
+    this.input.keyboard.addCapture("SPACE,ENTER,J,F");
     this.input.keyboard.on("keydown", this.onKeyDown, this);
     this.input.keyboard.on("keyup", this.onKeyUp, this);
     this.input.on("pointerdown", this.onPointerDown, this);
@@ -489,13 +665,13 @@ class TrackScene extends Phaser.Scene {
     }
     if (this.handleSpecialKey(event)) return;
     if (event.repeat || !SEND_KEYS.has(event.code)) return;
-    event.preventDefault();
+    this.sendDown = true;
     this.handlePress(this.gameTimeFromEvent(event.timeStamp));
   }
 
   onKeyUp(event) {
     if (!SEND_KEYS.has(event.code)) return;
-    event.preventDefault();
+    this.sendDown = false;
     this.handleRelease(this.gameTimeFromEvent(event.timeStamp));
   }
 
@@ -503,9 +679,11 @@ class TrackScene extends Phaser.Scene {
     return false;
   }
 
-  onPointerDown(pointer) {
-    if (this.handlePointerDown(pointer)) return;
-    this.handlePress(this.gameTimeFromEvent(pointer.event ? pointer.event.timeStamp : null));
+  onPointerDown(pointer, over) {
+    if (this.handlePointerDown(pointer, over)) return;
+    // Native pointer timestamps avoid the frame delay from Phaser's input queue.
+    this.sendDown = true;
+    this.handlePress(this.gameTimeFromEvent(pointer.downTime || performance.now()));
   }
 
   handlePointerDown() {
@@ -513,8 +691,9 @@ class TrackScene extends Phaser.Scene {
   }
 
   onPointerUp(pointer) {
-    const stamp = pointer.event ? pointer.event.timeStamp : null;
-    this.handleRelease(this.gameTimeFromEvent(stamp));
+    // See the note above; upTime can be 0 for a pointer that was never down.
+    this.sendDown = false;
+    this.handleRelease(this.gameTimeFromEvent(pointer.upTime || performance.now()));
   }
 
   // NOTE: Native timestamps avoid adding the frame delay from Phaser's input queue.
@@ -581,6 +760,7 @@ class TrackScene extends Phaser.Scene {
     this.noteIndex++;
 
     if (hit) {
+      SFX.clack(this);
       const grade = offset === null ? "SENT" : gradeOffset(offset);
       this.showFeedback(grade, grade === "PERFECT" ? COLOR.GOOD : COLOR.FG);
     } else {
@@ -598,6 +778,7 @@ class TrackScene extends Phaser.Scene {
     this.elapsedSeconds = Math.min(now - this.previousTimestamp, this.elapsedSeconds + 0.1);
     this.previousTimestamp = now - this.elapsedSeconds;
     const deltaSeconds = this.elapsedSeconds - previousElapsed;
+    this.lastDeltaSeconds = deltaSeconds;
 
     while (
       this.notes[this.noteIndex] &&
@@ -691,6 +872,70 @@ class TrackScene extends Phaser.Scene {
         this.graphics.fillCircle(x, midY, metrics.noteR);
       }
     }
+
+    this.drawKeyHardware(metrics);
+  }
+
+  /**
+   * Sounder box + strap key drawn left of the strike line. The lever tilts
+   * toward the contact whenever the send key is physically down, so even a
+   * missed press moves the hardware.
+   */
+  drawKeyHardware(metrics) {
+    const g = this.keyGfx;
+    if (!g) return;
+    g.clear();
+
+    const dt = Math.min(0.1, this.lastDeltaSeconds);
+    this.sendT += ((this.sendDown ? 1 : 0) - this.sendT) * Math.min(1, dt * 14);
+
+    const { lineX, midY, gateY, gateH, wide } = metrics;
+    // On the wide stage the group hangs left of the strike line; on the
+    // 480-wide portrait stage the left strip is only ~120px, so it anchors
+    // to the left margin below the gate instead.
+    const sx = wide ? lineX - 126 : 20; // sounder box left edge
+    const hingeX = wide ? lineX - 68 : 96;
+    const plinthW = wide ? 112 : 104;
+    const shelfY = wide ? midY + Math.round(gateH * 0.52) : gateY + gateH + 92;
+    const hingeY = shelfY - 6;
+
+    // Plinth shadow, so the hardware reads as one desk-top group.
+    g.fillStyle(0x000000, 0.24);
+    g.fillRect(sx - 8, shelfY - 26, plinthW + 16, 54);
+
+    // Sounder: wooden case, lit top lip, dark label, brass dial.
+    g.fillStyle(0x8a5a2a, 1);
+    g.fillRect(sx, shelfY - 18, 34, 22);
+    g.fillStyle(0xa8743a, 1);
+    g.fillRect(sx, shelfY - 18, 34, 4);
+    g.fillStyle(0x5f3f1c, 1);
+    g.fillRect(sx + 28, shelfY - 18, 6, 22);
+    g.fillStyle(0x2a2622, 1);
+    g.fillRect(sx + 5, shelfY - 9, 10, 8);
+    g.fillStyle(0xc9a44a, 1);
+    g.fillCircle(sx + 23, shelfY - 7, 3.5);
+
+    // Wire across the desk from the sounder to the key hinge.
+    const wireY = shelfY - 8;
+    g.fillStyle(0x2a2622, 1);
+    g.fillRect(sx + 34, wireY, hingeX - (sx + 34), 1);
+
+    // Strap key: brass base, contact nub, lever pivoting on the hinge.
+    g.fillStyle(0x8a6a24, 1);
+    g.fillRect(hingeX - 14, shelfY - 6, 28, 6);
+    g.fillStyle(0xc9a44a, 1);
+    g.fillRect(hingeX + 8, shelfY - 12, 5, 3);
+
+    const angle = -1.05 + this.sendT * 0.6; // idle up -> pressed down onto the contact
+    const leverLength = 16;
+    const endX = hingeX + Math.cos(angle) * leverLength;
+    const endY = hingeY + Math.sin(angle) * leverLength;
+    g.fillStyle(0x2a2622, 1);
+    for (let step = 0; step <= 6; step++) {
+      const t = step / 6;
+      g.fillRect(Math.round(hingeX + (endX - hingeX) * t) - 1, Math.round(hingeY + (endY - hingeY) * t) - 1, 3, 3);
+    }
+    g.fillCircle(endX, endY, 3);
   }
 
   /**
@@ -745,6 +990,11 @@ class Menu extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
+    // Sync the persisted mute preference into Phaser's sound manager.
+    applyMute();
+
+    addOfficeBackdrop(this, 0.5);
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.15 : 1;
 
@@ -784,6 +1034,8 @@ class Tutorial extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
 
+    addOfficeBackdrop(this, 0.6);
+
     const centerX = STAGE.W / 2;
     const scale = STAGE.W > 600 ? 1.1 : 1;
 
@@ -821,6 +1073,9 @@ class Practice extends TrackScene {
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
+
+    // Heavier dim: practice keeps amber notes readable over the scene.
+    addOfficeBackdrop(this, 0.76);
 
     this.stepIndex = 0;
     this.steps = ["E", "T", "A"];
@@ -957,19 +1212,33 @@ class Play extends TrackScene {
     this.pauseButton = this.add
       .text(STAGE.W - 16, 112, "[ PAUSE ]", { ...font(13), backgroundColor: "#1a120d", padding: { x: 7, y: 5 } })
       .setOrigin(1, 0)
-      .setDepth(2);
-    this.pauseButtonBounds = new Phaser.Geom.Rectangle(STAGE.W - 106, 108, 96, 30);
+      .setDepth(2)
+      .setInteractive({ useHandCursor: true });
 
     this.telegramText = this.add
       .text(STAGE.W / 2, STAGE.H * 0.78, "", font(16, true))
       .setOrigin(0.5)
-      .setColor(COLOR.DIM)
+      .setColor(INK)
       .setDepth(2);
+    this.formGfx = this.add.graphics().setDepth(1);
 
     this.scheduleWord();
-    startAmbience();
 
-    this.events.once("shutdown", () => stopAmbience());
+    // Ambience rides the Scene Clock: it freezes while the scene is paused and
+    // dies with the scene, so no start/stop plumbing is needed. It no-ops
+    // while muted.
+    playAmbientNote(this);
+    this.time.addEvent({ delay: 600, loop: true, callback: () => playAmbientNote(this) });
+
+    // Rebase the send-timing reference when the scene resumes (from the Pause
+    // menu or a Return to play after tab hide). Phaser does not clear custom
+    // scene-event listeners on shutdown, so remove it explicitly.
+    const onResume = () => {
+      this.previousTimestamp = performance.now() / 1e3 - this.elapsedSeconds;
+      playAmbientNote(this);
+    };
+    this.events.on(Phaser.Scenes.Events.RESUME, onResume);
+    this.events.once("shutdown", () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
   }
 
   update() {
@@ -992,10 +1261,38 @@ class Play extends TrackScene {
     this.statusText.setPosition(16, 14);
     this.wordHistoryText.setPosition(STAGE.W - 16, 14);
     this.pauseButton.setPosition(STAGE.W - 16, 112);
-    this.pauseButtonBounds.setTo(STAGE.W - 106, 108, 96, 30);
     this.telegramText.setPosition(STAGE.W / 2, STAGE.H * 0.78);
+    this.drawTelegramForm();
     if (this.backgroundShader) {
       this.backgroundShader.setPosition(STAGE.W / 2, STAGE.H / 2).setDisplaySize(STAGE.W, STAGE.H);
+    }
+  }
+
+  /**
+   * The SENDING ticker rides on a paper telegram form: a lit tape strip with
+   * perforated top and bottom edges, sized to the current word.
+   */
+  drawTelegramForm() {
+    this.formGfx.clear();
+    const text = this.telegramText;
+    if (!text.text) return;
+
+    const w = Math.max(140, text.width + 40);
+    const h = 30;
+    const cx = STAGE.W / 2;
+    const cy = STAGE.H * 0.78;
+    const g = this.formGfx;
+
+    g.fillStyle(0xe6dfc5, 1);
+    g.fillRect(cx - w / 2, cy - h / 2, w, h);
+    g.fillStyle(0xcfc7a4, 1);
+    g.fillRect(cx - w / 2, cy + h / 2 - 3, w, 3);
+
+    // Perforation bites along both edges.
+    g.fillStyle(0x0c0805, 1);
+    for (let x = cx - w / 2 + 6; x < cx + w / 2 - 4; x += 10) {
+      g.fillRect(x, cy - h / 2 - 1, 4, 3);
+      g.fillRect(x, cy + h / 2 - 2, 4, 3);
     }
   }
 
@@ -1038,6 +1335,7 @@ class Play extends TrackScene {
     this.wordHistory = this.wordHistory.slice(-WORD_HISTORY_LIMIT);
     this.wordHistoryText.setText(this.wordHistory.join("\n"));
     this.telegramText.setText(`SENDING  ${word}`);
+    this.drawTelegramForm();
 
     this.telegramCount++;
     this.beatSeconds = Math.max(BEAT_MIN_SECONDS, this.beatSeconds - BEAT_STEP_SECONDS);
@@ -1096,8 +1394,9 @@ class Play extends TrackScene {
     return false;
   }
 
-  handlePointerDown(pointer) {
-    if (this.pauseButtonBounds.contains(pointer.x, pointer.y)) {
+  handlePointerDown(pointer, over) {
+    // `over` is the reusable hit-test list; only inspect it synchronously.
+    if (over && over.includes(this.pauseButton)) {
       this.pauseGame();
       return true;
     }
@@ -1106,7 +1405,6 @@ class Play extends TrackScene {
 
   pauseGame() {
     if (!this.scene.isActive() || this.scene.isPaused()) return;
-    stopAmbience();
     this.scene.launch("Pause");
     this.scene.pause();
   }
@@ -1124,11 +1422,8 @@ class Pause extends Phaser.Scene {
     this.add.text(STAGE.W / 2, STAGE.H * 0.26, "LINE PAUSED", font(28, true)).setOrigin(0.5);
 
     const resume = () => {
-      const playScene = this.scene.get("Play");
-      playScene.previousTimestamp = performance.now() / 1e3 - playScene.elapsedSeconds;
       this.scene.stop();
       this.scene.resume("Play");
-      startAmbience();
     };
 
     const soundButton = makeActionButton(this, STAGE.W / 2, STAGE.H * 0.5, this.soundLabel(), () => {
@@ -1181,6 +1476,9 @@ class Over extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(COLOR.BG);
+
+    // Lamp-out variant: the office goes dark when the line dies.
+    addOfficeBackdrop(this, 0.58, false);
 
     if (this.finalScore > saveData.best) {
       saveData.best = this.finalScore;
@@ -1246,13 +1544,6 @@ window.addEventListener("resize", () => {
   }, 180);
 });
 
-// Pause when the tab loses focus so a run cannot die in the background.
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) return;
-  const playScene = game.scene.getScene("Play");
-  if (playScene && playScene.scene.isActive()) playScene.pauseGame();
-});
-
 // --- ENTRY POINT ---
 
 const game = new Phaser.Game({
@@ -1262,4 +1553,11 @@ const game = new Phaser.Game({
   backgroundColor: COLOR.BG,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: [Menu, Tutorial, Practice, Play, Pause, Over],
+});
+
+// Pause when the tab loses focus so a run cannot die in the background.
+// Phaser translates visibilitychange (and pagehide) into this event.
+game.events.on(Phaser.Core.Events.HIDDEN, () => {
+  const playScene = game.scene.getScene("Play");
+  if (playScene && playScene.scene.isActive()) playScene.pauseGame();
 });

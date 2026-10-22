@@ -4,6 +4,10 @@ Collected on the [LD60 entry](https://ldjam.com/) during judging. Verbatim, newe
 
 ## Comments
 
+**Viktoria** — roughly 2 days after submission
+
+> A calm, pleasant game. I enjoyed the feeling of being a telegraph operator.
+
 **Gevernus** — 15 hours after submission (edited)
 
 > a morse rhythm game that sneakily teaches you letters, neat. the play area is
@@ -27,7 +31,7 @@ Collected on the [LD60 entry](https://ldjam.com/) during judging. Verbatim, newe
 
 | Theme | Votes | Reading |
 | --- | --- | --- |
-| Identity lands | 2 | "old war teleprinter", "morse rhythm game" — keep the CRT/phosphor look and the tap-and-hold verb |
+| Identity lands | 3 | "old war teleprinter", "morse rhythm game", "feeling of being a telegraph operator" — keep the CRT/phosphor look and the tap-and-hold verb |
 | Desktop presentation | 1 | **Defect**: 480×720 portrait stage with `Scale.FIT` leaves huge gutters at 1080p, and hit objects are 12 physical pixels wide |
 | Onboarding | 1 | **Gap**: a miss only subtracts quality silently; nothing says early/late/too short. The tutorial is text, not practice |
 

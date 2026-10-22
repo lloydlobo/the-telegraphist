@@ -52,8 +52,9 @@ is the original 480×720 portrait jam build.
 ## How it works
 
 - `game.js` — the whole game: six Phaser scenes (`Menu`, `Tutorial`, `Practice`,
-  `Play`, `Pause`, `Over`), a WebAudio synth for dits/dahs/pads, and a GLSL CRT
-  shader for the screen background.
+  `Play`, `Pause`, `Over`), a WebAudio synth for dits/dahs/pads, a GLSL CRT
+  shader for the screen background, and the telegraph-office artwork painted
+  into a canvas texture at boot (no image assets).
 - `style.css` — full-bleed canvas, no scrollbars.
 - `vendor/phaser.min.js` — Phaser 4.2.1, vendored so the game runs offline.
 
@@ -65,8 +66,9 @@ so hit accuracy isn't inflated by a frame of latency.
 The jam build is tagged `ldjam-60-submission` and kept as-is. Changes since
 then are summarised in [docs/feedback.md](docs/feedback.md): desktop scaling and
 larger notes, an interactive tutorial with per-note feedback, a visible beat
-grid, gentler opening tempo, persisted progress, and a handful of input/audio
-fixes.
+grid, gentler opening tempo, persisted progress, a handful of input/audio
+fixes, and the retro telegraph-office dressing (menu backdrops plus sounder
+and telegram-form flavour in play).
 
 ## Credits
 
